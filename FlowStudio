@@ -1,45 +1,45 @@
 -- ==========================================================
--- FLOW STUDIO | EAGLE NATION STRESS TESTER
--- FIX: DNS RESOLVE ERROR - STABLE UI LOAD
+-- FLOW STUDIO | EAGLE NATION INF-FARM & EXPLOIT
+-- BRAND: FLOW STUDIO
 -- ==========================================================
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local CoreGui = game:GetService("CoreGui")
 local Player = Players.LocalPlayer
 
--- /// STABLE UI LOAD (Alternative to treez.ac) ///
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/78n/main/WindUI.lua"))()
+-- /// STABLE UI MIRROR (FLUENT) ///
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
-local Window = Library:CreateWindow({
-    Title = "Flow Studio | Eagle Nation",
-    Icon = "lucide-shield",
-    Author = "Flow Studio",
-    Folder = "FlowStudio_EagleNation",
+local Window = Fluent:CreateWindow({
+    Title = "Flow Studio",
+    SubTitle = "Eagle Nation Exploit",
+    TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
-    Transparent = true
+    Acrylic = true,
+    Theme = "Dark"
 })
 
--- /// DATA FROM MESSAGE.TXT ///
-local POS_HAY = Vector3.new(13381.6962890625, 149.0471649169922, 2986.895751953125)[cite: 1]
+-- /// DATA TABLES ///
+local POS_HAY = Vector3.new(13381.696, 149.047, 2986.895)[cite: 1]
 local POS_HORSES = {
-    Vector3.new(13327.056640625, 149.11163330078125, 2942.324951171875),[cite: 1]
-    Vector3.new(13340.306640625, 149.11129760742188, 2951.826171875),[cite: 1]
-    Vector3.new(13352.1435546875, 149.1110076904297, 2960.876220703125),[cite: 1]
-    Vector3.new(13314.7734375, 149.11175537109375, 2960.294189453125)[cite: 1]
+    Vector3.new(13327.056, 149.111, 2942.324),[cite: 1]
+    Vector3.new(13340.306, 149.111, 2951.826),[cite: 1]
+    Vector3.new(13352.143, 149.111, 2960.876),[cite: 1]
+    Vector3.new(13314.773, 149.111, 2960.294) [cite: 1]
 }
 
--- /// TABS ///
-local MainTab = Window:AddTab({ Title = "Automation", Icon = "lucide-play" })
-local SettingsTab = Window:AddTab({ Title = "Test Settings", Icon = "lucide-settings" })
-
 -- /// STATE ///
-local Toggles = { Farm = false, Tween = true }
-local Config = { Speed = 60, Delay = 1.3 }
+local Toggles = { AutoFarm = false, NoClip = false, InfJump = false }
+local Config = { Speed = 100, Delay = 0.5 }
 local horseIndex = 1
 
--- /// FUNCTIONS ///
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "zap" }),
+    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
+    Server = Window:AddTab({ Title = "Server", Icon = "globe" })
+}
+
+-- /// CORE EXPLOIT FUNCTIONS ///
 
 local function getRoot()
     return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
@@ -49,95 +49,103 @@ local function teleport(pos)
     local root = getRoot()
     if not root then return end
     
-    if Toggles.Tween then
-        local dist = (root.Position - pos).Magnitude
-        local info = TweenInfo.new(dist/Config.Speed, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(root, info, {CFrame = CFrame.new(pos + Vector3.new(0, 0.5, 0))})
-        tween:Play()
-        tween.Completed:Wait()
-    else
-        root.CFrame = CFrame.new(pos + Vector3.new(0, 0.5, 0))
-        task.wait(0.5)
-    end
+    -- Speed-based Tweening
+    local distance = (root.Position - pos).Magnitude
+    local duration = distance / Config.Speed
+    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))})
+    tween:Play()
+    tween.Completed:Wait()
 end
 
-local function fireInteraction(prompt)
-    if prompt and fireproximityprompt then
-        fireproximityprompt(prompt) -- Using direct fire as requested
-        return true
+-- Infinite Jump Logic
+game:GetService("UserInputService").JumpRequest:Connect(function()
+    if Toggles.InfJump then
+        Player.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
     end
-    return false
-end
+end)
 
--- /// MAIN LOOP ///
+-- /// FARMING LOGIC ///
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if Toggles.Farm then
+        if Toggles.AutoFarm then
             local backpack = Player:FindFirstChild("Backpack")
             local char = Player.Character
             
-            -- Hay Logic[cite: 1]
-            if not (backpack:FindFirstChild("Wheat") or char:FindFirstChild("Wheat")) then
+            -- Step 1: Grab Wheat[cite: 1]
+            if not (backpack:FindFirstChild("Wheat") or (char and char:FindFirstChild("Wheat"))) then
                 teleport(POS_HAY)
-                task.wait(0.5)
-                -- Search for prompt nearby
-                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
-                    local p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
-                    if p and (p.ActionText:find("Wheat") or p.ObjectText:find("Hay")) then
-                        fireInteraction(p)
-                        task.wait(Config.Delay + 1)
+                for i=1, 5 do -- Rapid check
+                    local p = nil
+                    for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 15)) do
+                        p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
+                        if p then break end
+                    end
+                    if p then
+                        fireproximityprompt(p)
+                        task.wait(Config.Delay)
                         break
                     end
+                    task.wait(0.1)
                 end
             end
 
-            -- Horse Logic[cite: 1]
-            if Toggles.Farm then
+            -- Step 2: Feed Horse[cite: 1]
+            if Toggles.AutoFarm then
                 teleport(POS_HORSES[horseIndex])
-                task.wait(0.5)
-                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
-                    local p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
-                    if p and (p.ActionText:find("Feed") or p.ObjectText:find("Horse")) then
-                        fireInteraction(p)
-                        task.wait(Config.Delay + 2)
-                        horseIndex = (horseIndex % #POS_HORSES) + 1
-                        break
-                    end
+                task.wait(0.3)
+                local p = nil
+                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 15)) do
+                    p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
+                    if p then break end
                 end
+                
+                if p then
+                    fireproximityprompt(p)
+                    task.wait(Config.Delay + 1)
+                end
+                horseIndex = (horseIndex % #POS_HORSES) + 1
             end
         end
     end
 end)
 
--- /// UI SETUP ///
+-- /// UI CONFIG ///
 
-MainTab:AddToggle({
-    Title = "Enable Automation Loop",
-    Default = false,
-    Callback = function(v) Toggles.Farm = v end
-})
+Tabs.Main:AddToggle("AutoFarm", {Title = "Auto-Farm Hay & Horses", Default = false}):OnChanged(function(v)
+    Toggles.AutoFarm = v
+end)
 
-MainTab:AddToggle({
-    Title = "Use Safe Tween",
-    Default = true,
-    Callback = function(v) Toggles.Tween = v end
-})
-
-SettingsTab:AddSlider({
-    Title = "Movement Speed",
-    Min = 20, Max = 200, Default = 60,
+Tabs.Main:AddSlider("SpeedSlider", {
+    Title = "Teleport Speed",
+    Min = 50, Max = 500, Default = 100, Rounding = 0,
     Callback = function(v) Config.Speed = v end
 })
 
-SettingsTab:AddSlider({
-    Title = "Hold Duration Simulation",
-    Min = 0.5, Max = 3.0, Default = 1.3,
-    Callback = function(v) Config.Delay = v end
+Tabs.Player:AddSlider("WS", {
+    Title = "WalkSpeed",
+    Min = 16, Max = 250, Default = 16, Rounding = 0,
+    Callback = function(v) Player.Character.Humanoid.WalkSpeed = v end
 })
 
-Library:Notify({
+Tabs.Player:AddToggle("InfJump", {Title = "Infinite Jump", Default = false}):OnChanged(function(v)
+    Toggles.InfJump = v
+end)
+
+Tabs.Server:AddButton({
+    Title = "Server Hop",
+    Callback = function()
+        local x = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100"))
+        for _, v in pairs(x.data) do
+            if v.playing < v.maxPlayers then
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id)
+            end
+        end
+    end
+})
+
+Fluent:Notify({
     Title = "Flow Studio",
-    Content = "Connection Established. DNS Error Resolved.",
+    Content = "Exploit Loaded. Maximize your gains.",
     Duration = 5
 })
