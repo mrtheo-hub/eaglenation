@@ -1,22 +1,31 @@
 -- ==========================================================
--- FLOW STUDIO | EAGLE NATION INF-FARM & EXPLOIT
--- BRAND: FLOW STUDIO
+-- FLOW STUDIO | EAGLE NATION ULTRA EXPLOIT
+-- STABILITY FIX: REDZ LIB MIRROR
 -- ==========================================================
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local Player = Players.LocalPlayer
+-- /// LOADING SYSTEM ///
+local CoreGui = game:GetService("CoreGui")
+local function notify(title, text)
+    local sg = Instance.new("ScreenGui", CoreGui)
+    local msg = Instance.new("TextLabel", sg)
+    msg.Size = UDim2.new(1, 0, 0.1, 0)
+    msg.Position = UDim2.new(0, 0, 0.1, 0)
+    msg.Text = "[" .. title .. "]: " .. text
+    msg.TextColor3 = Color3.new(1,1,1)
+    msg.BackgroundTransparency = 0.5
+    msg.BackgroundColor3 = Color3.new(0,0,0)
+    task.delay(3, function() sg:Destroy() end)
+end
 
--- /// STABLE UI MIRROR (FLUENT) ///
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+notify("FLOW STUDIO", "Injected. Loading Eagle Nation Suite...")
 
-local Window = Fluent:CreateWindow({
-    Title = "Flow Studio",
-    SubTitle = "Eagle Nation Exploit",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460),
-    Acrylic = true,
-    Theme = "Dark"
+-- /// STABLE UI LOAD ///
+local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/REDZ380/RedzLibV5/main/Source.lua"))()
+
+local Window = redzlib:MakeWindow({
+    Title = "Flow Studio: Eagle Nation",
+    SubTitle = "Exploit Edition",
+    SaveFolder = "FlowStudio_Eagle"
 })
 
 -- /// DATA TABLES ///
@@ -25,85 +34,66 @@ local POS_HORSES = {
     Vector3.new(13327.056, 149.111, 2942.324),[cite: 1]
     Vector3.new(13340.306, 149.111, 2951.826),[cite: 1]
     Vector3.new(13352.143, 149.111, 2960.876),[cite: 1]
-    Vector3.new(13314.773, 149.111, 2960.294) [cite: 1]
+    Vector3.new(13314.773, 149.111, 2960.294)  [cite: 1]
 }
 
 -- /// STATE ///
-local Toggles = { AutoFarm = false, NoClip = false, InfJump = false }
-local Config = { Speed = 100, Delay = 0.5 }
+local Toggles = { Farm = false, InfJump = false }
+local Config = { Speed = 150, Delay = 0.5 }
 local horseIndex = 1
 
-local Tabs = {
-    Main = Window:AddTab({ Title = "Main", Icon = "zap" }),
-    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    Server = Window:AddTab({ Title = "Server", Icon = "globe" })
-}
+-- /// TABS ///
+local MainTab = Window:MakeTab({"Automation", "zap"})
+local PlayerTab = Window:MakeTab({"Player", "user"})
 
--- /// CORE EXPLOIT FUNCTIONS ///
-
+-- /// FUNCTIONS ///
 local function getRoot()
-    return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    return game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 end
 
 local function teleport(pos)
     local root = getRoot()
     if not root then return end
-    
-    -- Speed-based Tweening
-    local distance = (root.Position - pos).Magnitude
-    local duration = distance / Config.Speed
-    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))})
+    local tween = game:GetService("TweenService"):Create(root, TweenInfo.new((root.Position - pos).Magnitude / Config.Speed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))})
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Infinite Jump Logic
+-- Infinite Jump
 game:GetService("UserInputService").JumpRequest:Connect(function()
     if Toggles.InfJump then
-        Player.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
+        game.Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
     end
 end)
 
--- /// FARMING LOGIC ///
+-- /// FARM LOOP ///
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if Toggles.AutoFarm then
-            local backpack = Player:FindFirstChild("Backpack")
-            local char = Player.Character
+        if Toggles.Farm then
+            local p = game.Players.LocalPlayer
+            local inv = p.Backpack:FindFirstChild("Wheat") or p.Character:FindFirstChild("Wheat")
             
-            -- Step 1: Grab Wheat[cite: 1]
-            if not (backpack:FindFirstChild("Wheat") or (char and char:FindFirstChild("Wheat"))) then
+            -- Step 1: Get Hay[cite: 1]
+            if not inv then
                 teleport(POS_HAY)
-                for i=1, 5 do -- Rapid check
-                    local p = nil
-                    for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 15)) do
-                        p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
-                        if p then break end
-                    end
-                    if p then
-                        fireproximityprompt(p)
-                        task.wait(Config.Delay)
-                        break
-                    end
-                    task.wait(0.1)
+                task.wait(0.3)
+                for _, v in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
+                    local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v.Parent:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then fireproximityprompt(prompt) break end
                 end
+                task.wait(Config.Delay)
             end
 
             -- Step 2: Feed Horse[cite: 1]
-            if Toggles.AutoFarm then
+            if Toggles.Farm then
                 teleport(POS_HORSES[horseIndex])
                 task.wait(0.3)
-                local p = nil
-                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 15)) do
-                    p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
-                    if p then break end
+                for _, v in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
+                    local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v.Parent:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then fireproximityprompt(prompt) break end
                 end
-                
-                if p then
-                    fireproximityprompt(p)
-                    task.wait(Config.Delay + 1)
-                end
+                task.wait(Config.Delay)
                 horseIndex = (horseIndex % #POS_HORSES) + 1
             end
         end
@@ -111,41 +101,28 @@ task.spawn(function()
 end)
 
 -- /// UI CONFIG ///
+MainTab:AddToggle({
+    Name = "Auto-Farm (Hay & Horses)",
+    Default = false,
+    Callback = function(v) Toggles.Farm = v end
+})
 
-Tabs.Main:AddToggle("AutoFarm", {Title = "Auto-Farm Hay & Horses", Default = false}):OnChanged(function(v)
-    Toggles.AutoFarm = v
-end)
-
-Tabs.Main:AddSlider("SpeedSlider", {
-    Title = "Teleport Speed",
-    Min = 50, Max = 500, Default = 100, Rounding = 0,
+MainTab:AddSlider({
+    Name = "Teleport Speed",
+    Min = 50, Max = 500, Default = 150,
     Callback = function(v) Config.Speed = v end
 })
 
-Tabs.Player:AddSlider("WS", {
-    Title = "WalkSpeed",
-    Min = 16, Max = 250, Default = 16, Rounding = 0,
-    Callback = function(v) Player.Character.Humanoid.WalkSpeed = v end
+PlayerTab:AddToggle({
+    Name = "Infinite Jump",
+    Default = false,
+    Callback = function(v) Toggles.InfJump = v end
 })
 
-Tabs.Player:AddToggle("InfJump", {Title = "Infinite Jump", Default = false}):OnChanged(function(v)
-    Toggles.InfJump = v
-end)
-
-Tabs.Server:AddButton({
-    Title = "Server Hop",
-    Callback = function()
-        local x = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100"))
-        for _, v in pairs(x.data) do
-            if v.playing < v.maxPlayers then
-                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id)
-            end
-        end
-    end
+PlayerTab:AddSlider({
+    Name = "WalkSpeed",
+    Min = 16, Max = 300, Default = 16,
+    Callback = function(v) game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = v end
 })
 
-Fluent:Notify({
-    Title = "Flow Studio",
-    Content = "Exploit Loaded. Maximize your gains.",
-    Duration = 5
-})
+notify("FLOW STUDIO", "Ready to Farm.")
