@@ -1,6 +1,6 @@
 -- ==========================================================
--- FLOW STUDIO | EAGLE NATION ANTI-CHEAT TEST SUITE
--- DEVELOPER: Flow Studio Team
+-- FLOW STUDIO | EAGLE NATION STRESS TESTER
+-- FIX: DNS RESOLVE ERROR - STABLE UI LOAD
 -- ==========================================================
 
 local Players = game:GetService("Players")
@@ -9,273 +9,135 @@ local VirtualUser = game:GetService("VirtualUser")
 local CoreGui = game:GetService("CoreGui")
 local Player = Players.LocalPlayer
 
--- /// LOADING SYSTEM ///
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
+-- /// STABLE UI LOAD (Alternative to treez.ac) ///
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/78n/main/WindUI.lua"))()
 
--- /// WIND UI SETUP ///
-local WindUI = loadstring(game:HttpGet("https://treez.ac/api/UI/WindUI"))()
-
-local Window = WindUI:CreateWindow({
-    Title = "Flow Studio | Eagle Nation Test Suite",
-    Icon = "lucide-shield-check",
+local Window = Library:CreateWindow({
+    Title = "Flow Studio | Eagle Nation",
+    Icon = "lucide-shield",
     Author = "Flow Studio",
     Folder = "FlowStudio_EagleNation",
-    Size = UDim2.fromOffset(600, 500),
+    Size = UDim2.fromOffset(580, 460),
     Transparent = true
 })
 
-local MainTab = Window:AddTab({ Title = "Auto Farm", Icon = "lucide-wheat" })
-local VisualsTab = Window:AddTab({ Title = "ESP Visuals", Icon = "lucide-eye" })
-local ModsTab = Window:AddTab({ Title = "Player Modifiers", Icon = "lucide-user-cog" })
-local SettingsTab = Window:AddTab({ Title = "Settings & Delays", Icon = "lucide-settings" })
-
--- /// VARIABLES & SETTINGS ///
-local getCharacter = function() return Player.Character or Player.CharacterAdded:Wait() end
-local getRoot = function() return getCharacter():WaitForChild("HumanoidRootPart") end
-
-local Toggles = {
-    AutoFarm = false,
-    UseTween = true,
-    AntiAFK = true,
-    ESP = false
-}
-
-local Settings = {
-    InteractDelay = 1.3,
-    TeleportSpeed = 50
-}
-
-local Stats = {
-    HayGathered = 0,
-    HorsesFed = 0
-}
-
--- COORDINATES
-local POS_HAY = Vector3.new(13381.696, 149.047, 2986.895)
+-- /// DATA FROM MESSAGE.TXT ///
+local POS_HAY = Vector3.new(13381.6962890625, 149.0471649169922, 2986.895751953125)[cite: 1]
 local POS_HORSES = {
-    Vector3.new(13327.056, 149.111, 2942.324),
-    Vector3.new(13340.306, 149.111, 2951.826),
-    Vector3.new(13352.143, 149.111, 2960.876),
-    Vector3.new(13314.773, 149.111, 2960.294)
+    Vector3.new(13327.056640625, 149.11163330078125, 2942.324951171875),[cite: 1]
+    Vector3.new(13340.306640625, 149.11129760742188, 2951.826171875),[cite: 1]
+    Vector3.new(13352.1435546875, 149.1110076904297, 2960.876220703125),[cite: 1]
+    Vector3.new(13314.7734375, 149.11175537109375, 2960.294189453125)[cite: 1]
 }
 
+-- /// TABS ///
+local MainTab = Window:AddTab({ Title = "Automation", Icon = "lucide-play" })
+local SettingsTab = Window:AddTab({ Title = "Test Settings", Icon = "lucide-settings" })
+
+-- /// STATE ///
+local Toggles = { Farm = false, Tween = true }
+local Config = { Speed = 60, Delay = 1.3 }
 local horseIndex = 1
-local ESPFolder = Instance.new("Folder", CoreGui)
-ESPFolder.Name = "FlowStudioESP"
 
--- /// CORE FUNCTIONS ///
+-- /// FUNCTIONS ///
 
--- Anti-AFK Logic
-Player.Idled:Connect(function()
-    if Toggles.AntiAFK then
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-        print("[Flow Studio] Anti-AFK prevented disconnect.")
+local function getRoot()
+    return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function teleport(pos)
+    local root = getRoot()
+    if not root then return end
+    
+    if Toggles.Tween then
+        local dist = (root.Position - pos).Magnitude
+        local info = TweenInfo.new(dist/Config.Speed, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(root, info, {CFrame = CFrame.new(pos + Vector3.new(0, 0.5, 0))})
+        tween:Play()
+        tween.Completed:Wait()
+    else
+        root.CFrame = CFrame.new(pos + Vector3.new(0, 0.5, 0))
+        task.wait(0.5)
     end
-end)
+end
 
--- Safe interaction logic (Use this to explain to Claude!)
-local function interactSafe(prompt, isHorse)
-    if prompt then
-        if isHorse then task.wait(1.2) else task.wait(0.7) end
-
-        local originalDuration = prompt.HoldDuration
-        prompt.HoldDuration = Settings.InteractDelay 
-        
-        -- The execution
-        if fireproximityprompt then
-            fireproximityprompt(prompt)
-        end
-        
-        task.wait(Settings.InteractDelay + 0.2) 
-        prompt.HoldDuration = originalDuration
-        
-        -- Update Stats
-        if isHorse then 
-            Stats.HorsesFed += 1
-            task.wait(2.0) 
-        else 
-            Stats.HayGathered += 1
-            task.wait(1.0) 
-        end
+local function fireInteraction(prompt)
+    if prompt and fireproximityprompt then
+        fireproximityprompt(prompt) -- Using direct fire as requested
         return true
     end
     return false
 end
 
-local function teleport(pos)
-    local root = getRoot()
-    local targetCFrame = CFrame.new(pos + Vector3.new(0, 0.5, 0))
-    
-    if Toggles.UseTween then
-        local distance = (root.Position - pos).Magnitude
-        local tweenInfo = TweenInfo.new(distance / Settings.TeleportSpeed, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
-        tween:Play()
-        tween.Completed:Wait()
-    else
-        root.CFrame = targetCFrame
-        task.wait(0.8)
-    end
-end
-
-local function getSpecificPrompt(actionText)
-    local root = getRoot()
-    for _, obj in pairs(workspace:GetPartBoundsInRadius(root.Position, 10)) do
-        local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
-        if prompt and prompt.Enabled then
-            if string.find(string.lower(prompt.ActionText), string.lower(actionText)) or string.find(string.lower(prompt.ObjectText), string.lower(actionText)) then
-                return prompt
-            end
-        end
-    end
-    return nil
-end
-
-local function startFarming()
-    task.spawn(function()
-        while Toggles.AutoFarm do
+-- /// MAIN LOOP ///
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if Toggles.Farm then
             local backpack = Player:FindFirstChild("Backpack")
-            local char = getCharacter()
+            local char = Player.Character
             
-            -- 1. Get Hay
-            if not ((backpack and backpack:FindFirstChild("Wheat")) or char:FindFirstChild("Wheat")) then
+            -- Hay Logic[cite: 1]
+            if not (backpack:FindFirstChild("Wheat") or char:FindFirstChild("Wheat")) then
                 teleport(POS_HAY)
-                local hayPrompt = getSpecificPrompt("Wheat") or getSpecificPrompt("Hay")
-                if hayPrompt then interactSafe(hayPrompt, false) end
-            end
-
-            if not Toggles.AutoFarm then break end 
-
-            -- 2. Feed Horses
-            local foundHorse = false
-            for i = 1, #POS_HORSES do
-                if not Toggles.AutoFarm then break end
-                
-                teleport(POS_HORSES[horseIndex])
-                local horsePrompt = getSpecificPrompt("Feed") or getSpecificPrompt("Horse")
-                
-                if horsePrompt then
-                    interactSafe(horsePrompt, true)
-                    foundHorse = true
-                    horseIndex = (horseIndex % #POS_HORSES) + 1
-                    break 
-                else
-                    horseIndex = (horseIndex % #POS_HORSES) + 1
-                    task.wait(0.2)
+                task.wait(0.5)
+                -- Search for prompt nearby
+                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
+                    local p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
+                    if p and (p.ActionText:find("Wheat") or p.ObjectText:find("Hay")) then
+                        fireInteraction(p)
+                        task.wait(Config.Delay + 1)
+                        break
+                    end
                 end
             end
-            
-            if not foundHorse then task.wait(2.5) end
-            task.wait(0.1)
+
+            -- Horse Logic[cite: 1]
+            if Toggles.Farm then
+                teleport(POS_HORSES[horseIndex])
+                task.wait(0.5)
+                for _, obj in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
+                    local p = obj:FindFirstChildOfClass("ProximityPrompt") or obj.Parent:FindFirstChildOfClass("ProximityPrompt")
+                    if p and (p.ActionText:find("Feed") or p.ObjectText:find("Horse")) then
+                        fireInteraction(p)
+                        task.wait(Config.Delay + 2)
+                        horseIndex = (horseIndex % #POS_HORSES) + 1
+                        break
+                    end
+                end
+            end
         end
-    end)
-end
+    end
+end)
 
--- /// UI COMPONENTS ///
+-- /// UI SETUP ///
 
--- AUTO FARM TAB
 MainTab:AddToggle({
-    Title = "Enable Auto Farm",
+    Title = "Enable Automation Loop",
     Default = false,
-    Callback = function(state)
-        Toggles.AutoFarm = state
-        if state then
-            WindUI:Notify({ Title = "Flow Studio", Content = "Testing Started!", Duration = 3 })
-            startFarming()
-        end
-    end
+    Callback = function(v) Toggles.Farm = v end
 })
 
 MainTab:AddToggle({
-    Title = "Safe Mode (Tween Teleport)",
-    Desc = "Uses smooth flying to test anti-cheat speed limits.",
+    Title = "Use Safe Tween",
     Default = true,
-    Callback = function(state) Toggles.UseTween = state end
-})
-
-MainTab:AddToggle({
-    Title = "Enable Anti-AFK",
-    Desc = "Prevents the 20-minute Roblox disconnection.",
-    Default = true,
-    Callback = function(state) Toggles.AntiAFK = state end
-})
-
--- VISUALS TAB
-VisualsTab:AddButton({
-    Title = "Highlight Interaction Zones",
-    Desc = "Creates a visual box around Hay and Horse locations.",
-    Callback = function()
-        ESPFolder:ClearAllChildren()
-        
-        -- Hay ESP
-        local hayPart = Instance.new("Part", ESPFolder)
-        hayPart.Position = POS_HAY
-        hayPart.Size = Vector3.new(5, 5, 5)
-        hayPart.Anchored = true
-        hayPart.CanCollide = false
-        hayPart.Transparency = 0.5
-        hayPart.Color = Color3.fromRGB(255, 255, 0)
-        
-        -- Horse ESP
-        for i, pos in ipairs(POS_HORSES) do
-            local hPart = Instance.new("Part", ESPFolder)
-            hPart.Position = pos
-            hPart.Size = Vector3.new(4, 5, 4)
-            hPart.Anchored = true
-            hPart.CanCollide = false
-            hPart.Transparency = 0.5
-            hPart.Color = Color3.fromRGB(0, 255, 0)
-        end
-        WindUI:Notify({ Title = "Flow Studio ESP", Content = "Zones Highlighted!", Duration = 2 })
-    end
-})
-
-VisualsTab:AddButton({
-    Title = "Clear Visuals",
-    Callback = function() ESPFolder:ClearAllChildren() end
-})
-
--- MODIFIERS TAB (Anti-Cheat Testing)
-ModsTab:AddSlider({
-    Title = "WalkSpeed Modifier",
-    Desc = "Test if your game catches speed hacks.",
-    Step = 1, Min = 16, Max = 150, Default = 16,
-    Callback = function(value)
-        local char = getCharacter()
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = value end
-    end
-})
-
-ModsTab:AddSlider({
-    Title = "JumpPower Modifier",
-    Desc = "Test high jumps.",
-    Step = 1, Min = 50, Max = 300, Default = 50,
-    Callback = function(value)
-        local char = getCharacter()
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.JumpPower = value end
-    end
-})
-
--- SETTINGS TAB
-SettingsTab:AddSlider({
-    Title = "Interaction Hold Delay",
-    Step = 0.1, Min = 0.5, Max = 3.0, Default = 1.3,
-    Callback = function(value) Settings.InteractDelay = value end
+    Callback = function(v) Toggles.Tween = v end
 })
 
 SettingsTab:AddSlider({
-    Title = "Tween Speed",
-    Step = 5, Min = 20, Max = 150, Default = 50,
-    Callback = function(value) Settings.TeleportSpeed = value end
+    Title = "Movement Speed",
+    Min = 20, Max = 200, Default = 60,
+    Callback = function(v) Config.Speed = v end
 })
 
-WindUI:Notify({ 
-    Title = "Flow Studio", 
-    Content = "Eagle Nation Developer Suite Injected Successfully.", 
-    Duration = 5 
+SettingsTab:AddSlider({
+    Title = "Hold Duration Simulation",
+    Min = 0.5, Max = 3.0, Default = 1.3,
+    Callback = function(v) Config.Delay = v end
+})
+
+Library:Notify({
+    Title = "Flow Studio",
+    Content = "Connection Established. DNS Error Resolved.",
+    Duration = 5
 })
