@@ -1,128 +1,205 @@
--- ==========================================================
--- FLOW STUDIO | EAGLE NATION ULTRA EXPLOIT
--- STABILITY FIX: REDZ LIB MIRROR
--- ==========================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Stats = game:GetService("Stats")
+local Lighting = game:GetService("Lighting")
+local VirtualUser = game:GetService("VirtualUser")
+local GuiService = game:GetService("GuiService")
+local Player = Players.LocalPlayer
 
--- /// LOADING SYSTEM ///
-local CoreGui = game:GetService("CoreGui")
-local function notify(title, text)
-    local sg = Instance.new("ScreenGui", CoreGui)
-    local msg = Instance.new("TextLabel", sg)
-    msg.Size = UDim2.new(1, 0, 0.1, 0)
-    msg.Position = UDim2.new(0, 0, 0.1, 0)
-    msg.Text = "[" .. title .. "]: " .. text
-    msg.TextColor3 = Color3.new(1,1,1)
-    msg.BackgroundTransparency = 0.5
-    msg.BackgroundColor3 = Color3.new(0,0,0)
-    task.delay(3, function() sg:Destroy() end)
+_G.Flow_AutoFarm = false
+_G.Flow_FarmSpeed = 1.3
+_G.Flow_WebhookToggle = false
+_G.Flow_WebhookURL = ""
+_G.Flow_AntiAFK = true
+_G.Flow_AntiStaff = false
+_G.Flow_Invisible = false
+_G.Flow_AutoReconnect = true
+
+local RecentActivity = {}
+local StartMoney = 0
+local pStats = Player:WaitForChild("leaderstats", 10)
+if pStats and pStats:FindFirstChild("Money") then
+    StartMoney = pStats.Money.Value
 end
 
-notify("FLOW STUDIO", "Injected. Loading Eagle Nation Suite...")
-
--- /// STABLE UI LOAD ///
-local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/REDZ380/RedzLibV5/main/Source.lua"))()
-
-local Window = redzlib:MakeWindow({
-    Title = "Flow Studio: Eagle Nation",
-    SubTitle = "Exploit Edition",
-    SaveFolder = "FlowStudio_Eagle"
-})
-
--- /// DATA TABLES ///
-local POS_HAY = Vector3.new(13381.696, 149.047, 2986.895)[cite: 1]
-local POS_HORSES = {
-    Vector3.new(13327.056, 149.111, 2942.324),[cite: 1]
-    Vector3.new(13340.306, 149.111, 2951.826),[cite: 1]
-    Vector3.new(13352.143, 149.111, 2960.876),[cite: 1]
-    Vector3.new(13314.773, 149.111, 2960.294)  [cite: 1]
+local POSISI_HAY = Vector3.new(13381.6962890625, 149.0471649169922, 2986.895751953125)
+local POSISI_KUDA = {
+    Vector3.new(13327.056640625, 149.11163330078125, 2942.324951171875),
+    Vector3.new(13340.306640625, 149.11129760742188, 2951.826171875),
+    Vector3.new(13352.1435546875, 149.1110076904297, 2960.876220703125),
+    Vector3.new(13314.7734375, 149.11175537109375, 2960.294189453125)
 }
+local kudaIndex = 1
 
--- /// STATE ///
-local Toggles = { Farm = false, InfJump = false }
-local Config = { Speed = 150, Delay = 0.5 }
-local horseIndex = 1
+local function addLog(msg)
+    table.insert(RecentActivity, 1, "[" .. os.date("%X") .. "] " .. msg)
+    if #RecentActivity > 5 then table.remove(RecentActivity, 6) end
+end
 
--- /// TABS ///
-local MainTab = Window:MakeTab({"Automation", "zap"})
-local PlayerTab = Window:MakeTab({"Player", "user"})
-
--- /// FUNCTIONS ///
 local function getRoot()
-    return game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
 end
 
-local function teleport(pos)
-    local root = getRoot()
-    if not root then return end
-    local tween = game:GetService("TweenService"):Create(root, TweenInfo.new((root.Position - pos).Magnitude / Config.Speed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))})
-    tween:Play()
-    tween.Completed:Wait()
+local function safeTrigger(prompt)
+    if not prompt then return end
+    prompt:InputBegan()
+    task.wait(prompt.HoldDuration + 0.1)
+    prompt:InputEnded()
 end
 
--- Infinite Jump
-game:GetService("UserInputService").JumpRequest:Connect(function()
-    if Toggles.InfJump then
-        game.Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
+GuiService.ErrorMessageChanged:Connect(function()
+    if _G.Flow_AutoReconnect then
+        task.wait(5)
+        game:GetService("TeleportService"):Teleport(game.PlaceId, Player)
     end
 end)
 
--- /// FARM LOOP ///
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        if Toggles.Farm then
-            local p = game.Players.LocalPlayer
-            local inv = p.Backpack:FindFirstChild("Wheat") or p.Character:FindFirstChild("Wheat")
-            
-            -- Step 1: Get Hay[cite: 1]
-            if not inv then
-                teleport(POS_HAY)
-                task.wait(0.3)
-                for _, v in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
-                    local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v.Parent:FindFirstChildOfClass("ProximityPrompt")
-                    if prompt then fireproximityprompt(prompt) break end
-                end
-                task.wait(Config.Delay)
-            end
+local function SmartFarm()
+    while _G.Flow_AutoFarm do
+        local root = getRoot()
+        if not root then task.wait(1) continue end
 
-            -- Step 2: Feed Horse[cite: 1]
-            if Toggles.Farm then
-                teleport(POS_HORSES[horseIndex])
-                task.wait(0.3)
-                for _, v in pairs(workspace:GetPartBoundsInRadius(getRoot().Position, 10)) do
-                    local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v.Parent:FindFirstChildOfClass("ProximityPrompt")
-                    if prompt then fireproximityprompt(prompt) break end
+        local hasWheat = Player.Backpack:FindFirstChild("Wheat") or (Player.Character and Player.Character:FindFirstChild("Wheat"))
+        if not hasWheat then
+            root.CFrame = CFrame.new(POSISI_HAY + Vector3.new(0, 0.5, 0))
+            task.wait(0.8)
+            for _, v in pairs(workspace:GetPartBoundsInRadius(root.Position, 10)) do
+                local p = v:FindFirstChildOfClass("ProximityPrompt") or (v.Parent and v.Parent:FindFirstChildOfClass("ProximityPrompt"))
+                if p and (string.find(string.lower(p.ActionText), "wheat") or string.find(string.lower(p.ObjectText), "hay")) then
+                    p.HoldDuration = _G.Flow_FarmSpeed
+                    safeTrigger(p)
+                    addLog("Ambil Jerami")
+                    break
                 end
-                task.wait(Config.Delay)
-                horseIndex = (horseIndex % #POS_HORSES) + 1
             end
         end
+
+        for i = 1, #POSISI_KUDA do
+            if not _G.Flow_AutoFarm then break end
+            root.CFrame = CFrame.new(POSISI_KUDA[kudaIndex] + Vector3.new(0, 0.5, 0))
+            task.wait(1.0)
+            
+            local feedFound = false
+            for _, v in pairs(workspace:GetPartBoundsInRadius(root.Position, 10)) do
+                local p = v:FindFirstChildOfClass("ProximityPrompt") or (v.Parent and v.Parent:FindFirstChildOfClass("ProximityPrompt"))
+                if p and (string.find(string.lower(p.ActionText), "feed") or string.find(string.lower(p.ObjectText), "horse")) then
+                    p.HoldDuration = _G.Flow_FarmSpeed
+                    safeTrigger(p)
+                    addLog("Beri Makan Kuda #" .. kudaIndex)
+                    feedFound = true
+                    break
+                end
+            end
+            kudaIndex = (kudaIndex % #POSISI_KUDA) + 1
+            if feedFound then break end
+            task.wait(0.2)
+        end
+        task.wait(0.1)
+    end
+end
+
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Window = Fluent:CreateWindow({
+    Title = "Flow Studio",
+    SubTitle = "by Theo",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(540, 380),
+    Acrylic = false,
+    Theme = "Dark"
+})
+
+local Tabs = {
+    Home = Window:AddTab({ Title = "Home", Icon = "home" }),
+    Main = Window:AddTab({ Title = "Automation", Icon = "tractor" }),
+    Webhook = Window:AddTab({ Title = "Integration", Icon = "webhook" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "box" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+Tabs.Home:AddParagraph({
+    Title = "© 2026 Flow Studio",
+    Content = "Script by Theo. Optimized for Eagle Nation."
+})
+
+Tabs.Home:AddButton({
+    Title = "Copy Discord",
+    Callback = function() setclipboard("https://discord.gg/flowstudio") end
+})
+
+local ActivityLog = Tabs.Home:AddParagraph({ Title = "Activity Log", Content = "Loading..." })
+
+task.spawn(function()
+    while task.wait(5) do
+        local moneyGained = (pStats and pStats:FindFirstChild("Money")) and (pStats.Money.Value - StartMoney) or 0
+        ActivityLog:SetValues({Content = "Profit: $" .. moneyGained .. "\n\nLogs:\n" .. table.concat(RecentActivity, "\n")})
     end
 end)
 
--- /// UI CONFIG ///
-MainTab:AddToggle({
-    Name = "Auto-Farm (Hay & Horses)",
+Tabs.Main:AddToggle("FarmToggle", {
+    Title = "Auto Farm",
     Default = false,
-    Callback = function(v) Toggles.Farm = v end
+    Callback = function(state)
+        _G.Flow_AutoFarm = state
+        if state then task.spawn(SmartFarm) end
+    end
 })
 
-MainTab:AddSlider({
-    Name = "Teleport Speed",
-    Min = 50, Max = 500, Default = 150,
-    Callback = function(v) Config.Speed = v end
+Tabs.Main:AddSlider("Speed", {
+    Title = "Delay",
+    Default = 1.3, Min = 0.4, Max = 3.0, Rounding = 1,
+    Callback = function(v) _G.Flow_FarmSpeed = v end
 })
 
-PlayerTab:AddToggle({
-    Name = "Infinite Jump",
-    Default = false,
-    Callback = function(v) Toggles.InfJump = v end
+Tabs.Webhook:AddInput("WebURL", { Title = "Webhook URL", Callback = function(v) _G.Flow_WebhookURL = v end })
+Tabs.Webhook:AddToggle("WebToggle", { Title = "Enable Webhook", Callback = function(v) _G.Flow_WebhookToggle = v end })
+
+Tabs.Misc:AddToggle("AntiAFK", { Title = "Anti AFK", Default = true, Callback = function(v) _G.Flow_AntiAFK = v end })
+Tabs.Misc:AddToggle("AutoRecon", { Title = "Auto Reconnect", Default = true, Callback = function(v) _G.Flow_AutoReconnect = v end })
+Tabs.Misc:AddToggle("Invis", {
+    Title = "Invisible (FE)",
+    Callback = function(state)
+        if state and Player.Character and Player.Character:FindFirstChild("LowerTorso") then
+            Player.Character.LowerTorso.RootJoint:Destroy()
+        elseif not state and Player.Character then
+            Player.Character:BreakJoints()
+        end
+    end
 })
 
-PlayerTab:AddSlider({
-    Name = "WalkSpeed",
-    Min = 16, Max = 300, Default = 16,
-    Callback = function(v) game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = v end
+Tabs.Settings:AddColorpicker("UIColor", {
+    Title = "UI Accent",
+    Default = Color3.fromRGB(80, 80, 80),
+    Callback = function(t) Window.WindowFrame.BorderColor3 = t end
 })
 
-notify("FLOW STUDIO", "Ready to Farm.")
+Tabs.Settings:AddToggle("ThreeD", {
+    Title = "3D Shadows",
+    Default = true,
+    Callback = function(v) Window.WindowFrame.Style = v and "DropShadow" or "Flat" end
+})
+
+local Overlay = Instance.new("ScreenGui", game.CoreGui)
+local Frame = Instance.new("Frame", Overlay)
+Frame.Size = UDim2.new(0, 200, 0, 25)
+Frame.Position = UDim2.new(0.5, -100, 0, 5)
+Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Frame.BorderSizePixel = 1
+Frame.Draggable = true
+Frame.Active = true
+
+local Text = Instance.new("TextLabel", Frame)
+Text.Size = UDim2.new(1, 0, 1, 0)
+Text.BackgroundTransparency = 1
+Text.TextColor3 = Color3.fromRGB(255, 255, 255)
+Text.Font = Enum.Font.Code
+Text.TextSize = 11
+
+RunService.RenderStepped:Connect(function(dt)
+    local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    local fps = math.floor(1/dt)
+    Text.Text = string.format("%d ms • CPU %0.1f ms • %d fps", ping, Stats.PerformanceStats.CPU:GetValue(), fps)
+end)
+
+Window:SelectTab(1)
+addLog("System Started")
