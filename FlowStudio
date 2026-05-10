@@ -1,252 +1,503 @@
--- [[ FLOW STUDIO V1.0.0 ALPHA ]] --
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Stats = game:GetService("Stats")
-local Lighting = game:GetService("Lighting")
-local VirtualUser = game:GetService("VirtualUser")
-local TeleportService = game:GetService("TeleportService")
-local GuiService = game:GetService("GuiService")
-local Player = Players.LocalPlayer
+--[[
+    FLOW STUDIO V1.3.5 PREMIUM | Developer: Theo | Hub: Flow Hub
+    Status: Ultimate Optimized & Production Ready
+--]]
 
--- GLOBAL SETTINGS
-_G.Flow_AutoFarm = false
-_G.Flow_SelectedJob = "Haybales" -- "Haybales" or "Construction"
-_G.Flow_FarmSpeed = 1.0
-_G.Flow_AutoReconnect = true
-_G.Flow_PerformanceMode = false
-
-local RecentActivity = {}
-local StartMoney = 0
-local pStats = Player:WaitForChild("leaderstats", 20)
-if pStats and pStats:FindFirstChild("Money") then StartMoney = pStats.Money.Value end
-
--- COORDINATES (Berdasarkan Video & Data)
-local POS_HAY = Vector3.new(13381.69, 149.04, 2986.89)
-local POS_HORSES = {
-    Vector3.new(13327.05, 149.11, 2942.32),
-    Vector3.new(13340.30, 149.11, 2951.82),
-    Vector3.new(13352.14, 149.11, 2960.87),
-    Vector3.new(13314.77, 149.11, 2960.29)
+local Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    TweenService = game:GetService("TweenService"),
+    HttpService = game:GetService("HttpService"),
+    TeleportService = game:GetService("TeleportService"),
+    Lighting = game:GetService("Lighting"),
+    VirtualUser = game:GetService("VirtualUser"),
+    Workspace = game:GetService("Workspace"),
+    CoreGui = game:GetService("CoreGui"),
+    GuiService = game:GetService("GuiService"),
+    MarketplaceService = game:GetService("MarketplaceService")
 }
 
-local POS_CEMENT = Vector3.new(13271.3, 149.1, 3108.5) -- Area Bob (Construction)
-local POS_MIXERS = {
-    Vector3.new(13286.5, 149.1, 3098.2),
-    Vector3.new(13292.1, 149.1, 3104.5),
-    Vector3.new(13280.4, 149.1, 3112.8)
+local Player = Services.Players.LocalPlayer
+local requestFunc = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- ============= CONFIGURATION =============
+local FlowConfig = {
+    AutoFarm = false,
+    Job = "Haybales",
+    Speed = 1.0,
+    TweenSpeed = 120,
+    AutoReconnect = true,
+    StreamerMode = false,
+    PerfMode = false,
+    WebhookURL = "",
+    DiscordID = "",
+    AutoRefuel = false,
+    UIToggleKey = "Insert"
 }
 
-local targetIndex = 1
+local Session = {
+    StartMoney = 0,
+    CurrentProfit = 0,
+    StartTime = os.time(),
+    Logs = {},
+    TargetIndex = 1,
+    LastWebhookUpdate = 0
+}
 
--- UTILITIES
+local pStats = Player:WaitForChild("leaderstats", 10)
+if pStats and pStats:FindFirstChild("Money") then
+    Session.StartMoney = pStats.Money.Value
+end
+
+-- ============= COORDINATES =============
+local TP = {
+    JobHorse     = Vector3.new(13377.90, 149.05, 2997.01),
+    JobConst     = Vector3.new(29274.67, 195.81, -2377.38),
+    HaySupply    = Vector3.new(13380.60, 149.04, 2985.09),
+    CementSupply = Vector3.new(29264.86, 195.81, -2377.06),
+    GasStation   = Vector3.new(-643.71, 8.09, 10.98),
+    AFK          = Vector3.new(0, 50, 0)
+}
+
+local Targets = {
+    Horses = {
+        Vector3.new(13313.27, 149.11, 2958.99), Vector3.new(13328.10, 149.11, 2942.50),
+        Vector3.new(13339.88, 149.11, 2951.84), Vector3.new(13352.23, 149.11, 2961.71)
+    },
+    Mixers = {
+        Vector3.new(29250.05, 195.45, -2345.13), Vector3.new(29246.88, 195.28, -2328.42),
+        Vector3.new(29244.01, 195.17, -2311.22), Vector3.new(29239.97, 194.90, -2295.04),
+        Vector3.new(29285.82, 194.75, -2284.93), Vector3.new(29289.38, 195.01, -2301.54),
+        Vector3.new(29292.69, 195.22, -2318.36), Vector3.new(29297.62, 195.69, -2334.45)
+    }
+}
+
+-- ============= UTILITIES & LOGGING =============
 local function addLog(msg)
-    table.insert(RecentActivity, 1, "[" .. os.date("%X") .. "] " .. msg)
-    if #RecentActivity > 5 then table.remove(RecentActivity, 6) end
+    table.insert(Session.Logs, 1, string.format("[%s] %s", os.date("%X"), msg))
+    if #Session.Logs > 6 then table.remove(Session.Logs, 7) end
 end
 
 local function getRoot()
     return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- FUNCTION: FIRE PROXIMITY PROMPT (REINSTATED)
-local function interact(prompt)
-    if not prompt then return end
-    if fireproximityprompt then
-        fireproximityprompt(prompt)
-    else
-        -- Fallback manual jika executor tidak support fireproximityprompt
-        prompt:InputBegan()
-        task.wait(0.1)
-        prompt:InputEnded()
-    end
-end
-
--- FUNCTION: FIND NEARBY PROMPT
-local function findPrompt(names)
-    local root = getRoot()
-    if not root then return nil end
-    for _, v in pairs(workspace:GetPartBoundsInRadius(root.Position, 12)) do
-        local p = v:FindFirstChildOfClass("ProximityPrompt") or (v.Parent and v.Parent:FindFirstChildOfClass("ProximityPrompt"))
-        if p and p.Enabled then
-            for _, name in pairs(names) do
-                if p.ActionText:lower():find(name:lower()) or p.ObjectText:lower():find(name:lower()) then
-                    return p
-                end
-            end
-        end
+local function getVehicle()
+    local char = Player.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.SeatPart then
+        return char.Humanoid.SeatPart.Parent
     end
     return nil
 end
 
--- AUTO RECONNECT
-GuiService.ErrorMessageChanged:Connect(function()
-    if _G.Flow_AutoReconnect then
+-- ============= PHYSICS-SAFE TWEEN =============
+local function tweenTo(targetPos)
+    local root = getRoot()
+    if not root or not FlowConfig.AutoFarm then return false end
+    
+    local distance = (root.Position - targetPos).Magnitude
+    if distance < 0.5 then return true end
+    
+    local direction = (targetPos - root.Position).Unit
+    local tInfo = TweenInfo.new(distance / FlowConfig.TweenSpeed, Enum.EasingStyle.Linear)
+    local tween = Services.TweenService:Create(root, tInfo, {CFrame = CFrame.new(targetPos)})
+    
+    local velocitySync
+    velocitySync = Services.RunService.Heartbeat:Connect(function()
+        if not FlowConfig.AutoFarm or not root.Parent then
+            velocitySync:Disconnect()
+            return
+        end
+        root.AssemblyLinearVelocity = direction * FlowConfig.TweenSpeed
+    end)
+    
+    tween:Play()
+    
+    local completed = false
+    local connection
+    connection = tween.Completed:Connect(function()
+        completed = true
+        if velocitySync then velocitySync:Disconnect() end
+        root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+        connection:Disconnect()
+    end)
+    
+    -- Interruptible Wait
+    while not completed and FlowConfig.AutoFarm do
+        task.wait(0.1)
+    end
+    
+    if not FlowConfig.AutoFarm then
+        tween:Cancel()
+        if velocitySync then velocitySync:Disconnect() end
+        root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+    end
+    
+    return completed
+end
+
+-- ============= SMART PROMPT INTERACTION =============
+local function interactPrompts(keywords, holdTime)
+    local root = getRoot()
+    if not root then return false end
+    for _, part in ipairs(Services.Workspace:GetPartBoundsInRadius(root.Position, 15)) do
+        local prompt = part:FindFirstChildOfClass("ProximityPrompt") or (part.Parent and part.Parent:FindFirstChildOfClass("ProximityPrompt"))
+        if prompt and prompt.Enabled then
+            for _, kw in ipairs(keywords) do
+                local text = (tostring(prompt.ActionText) .. tostring(prompt.ObjectText)):lower()
+                if text:find(kw) then
+                    if holdTime and holdTime > 0 then
+                        prompt:InputBegan()
+                        task.wait(holdTime)
+                        prompt:InputEnded()
+                    else
+                        if fireproximityprompt then
+                            fireproximityprompt(prompt)
+                        else
+                            prompt:InputBegan()
+                            task.wait(0.1)
+                            prompt:InputEnded()
+                        end
+                    end
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- ============= ADVANCED WEBHOOK V3 =============
+local function SendWebhook(msgType, extraData)
+    if not FlowConfig.WebhookURL or FlowConfig.WebhookURL == "" or not requestFunc then return end
+    
+    local tag = ""
+    local isDisconnect = (msgType == "Disconnect")
+    
+    if isDisconnect then
+        tag = (FlowConfig.DiscordID ~= "") and "<@" .. FlowConfig.DiscordID .. ">" or "@everyone"
+    end
+
+    local embed = {}
+    if isDisconnect then
+        local reconText = FlowConfig.AutoReconnect and "\n\n**Status:** 🔄 *Reconnecting to server...*" or ""
+        embed = {
+            title = "🚨 DISCONNECT NOTICE",
+            description = "Akun telah terputus dari server." .. reconText,
+            color = 0xFF4747,
+            fields = {
+                {name = "Account", value = "||" .. Player.Name .. "||", inline = true},
+                {name = "Error Code / Reason", value = tostring(extraData), inline = false}
+            },
+            footer = {text = "Flow Hub Protection System"},
+            timestamp = DateTime.now():ToIsoDate()
+        }
+    else
+        if os.time() - Session.LastWebhookUpdate < 80 then return end
+        Session.LastWebhookUpdate = os.time()
+        
+        local timeMinutes = math.floor((os.time() - Session.StartTime) / 60)
+        embed = {
+            title = "📊 FLOW STUDIO UPDATE",
+            color = 0x47FFAB,
+            fields = {
+                {name = "User", value = "||" .. Player.Name .. "||", inline = true},
+                {name = "Net Profit", value = "**$" .. Session.CurrentProfit .. "**", inline = true},
+                {name = "Current Job", value = FlowConfig.Job, inline = true},
+                {name = "Runtime", value = timeMinutes .. " Mins", inline = true}
+            },
+            footer = {text = "Flow Hub"},
+            timestamp = DateTime.now():ToIsoDate()
+        }
+    end
+
+    local payload = {
+        content = tag ~= "" and tag or nil,
+        embeds = {embed}
+    }
+
+    pcall(function()
+        requestFunc({
+            Url = FlowConfig.WebhookURL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = Services.HttpService:JSONEncode(payload)
+        })
+    end)
+end
+
+-- Hook Disconnect
+Services.GuiService.ErrorMessageChanged:Connect(function()
+    local msg = Services.GuiService:GetErrorMessage()
+    SendWebhook("Disconnect", msg)
+    if FlowConfig.AutoReconnect then
         task.wait(5)
-        TeleportService:Teleport(game.PlaceId, Player)
+        Services.TeleportService:Teleport(game.PlaceId, Player)
     end
 end)
 
--- CORE AUTOMATION ENGINE
-local function MainEngine()
-    while _G.Flow_AutoFarm do
+task.spawn(function()
+    while task.wait(90) do
+        if FlowConfig.AutoFarm then SendWebhook("Update") end
+    end
+end)
+
+-- ============= ANTI-STAFF MODULE (TRIPLE CHECK) =============
+local StaffGroupID = 5177284
+local StaffRankThreshold = 10
+local ManualStaffIDs = {12345678} -- Backup ID Check
+
+local function isStaff(plr)
+    if table.find(ManualStaffIDs, plr.UserId) then return true end
+    local success, rank = pcall(function() return plr:GetRankInGroup(StaffGroupID) end)
+    if success and rank and rank >= StaffRankThreshold then return true end
+    local tags = plr:FindFirstChild("tags")
+    if tags and tags:IsA("StringValue") and (tags.Value:lower():match("admin") or tags.Value:lower():match("mod")) then
+        return true
+    end
+    return false
+end
+
+local function RunSecurityProtocol(plrName)
+    FlowConfig.AutoFarm = false
+    addLog("SECURITY: Staff Detected (" .. plrName .. "). Hopping...")
+    local success, servers = pcall(function()
+        return Services.HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=10"))
+    end)
+    if success and servers and servers.data then
+        for _, srv in ipairs(servers.data) do
+            if srv.playing < srv.maxPlayers and srv.id ~= game.JobId then
+                Services.TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, Player)
+                return
+            end
+        end
+    end
+    Player:Kick("Error Code: 277\nPlease check your internet connection.")
+end
+
+Services.Players.PlayerAdded:Connect(function(plr)
+    task.spawn(function()
+        if isStaff(plr) then RunSecurityProtocol(plr.Name) end
+    end)
+end)
+
+-- ============= CORE FARM ENGINE =============
+local function runFarmCycle()
+    while FlowConfig.AutoFarm do
         local root = getRoot()
         if not root then task.wait(1) continue end
 
-        if _G.Flow_SelectedJob == "Haybales" then
-            -- JOB 1: HAYBALES
-            local hasItem = Player.Backpack:FindFirstChild("Wheat") or (Player.Character and Player.Character:FindFirstChild("Wheat"))
-            if not hasItem then
-                root.CFrame = CFrame.new(POS_HAY + Vector3.new(0, 1, 0))
-                task.wait(0.5)
-                local p = findPrompt({"Wheat", "Hay", "Grab"})
-                if p then interact(p) addLog("Grabbed Hay") task.wait(_G.Flow_FarmSpeed) end
-            else
-                local target = POS_HORSES[targetIndex]
-                root.CFrame = CFrame.new(target + Vector3.new(0, 1, 0))
-                task.wait(0.5)
-                local p = findPrompt({"Feed", "Horse", "Deliver"})
-                if p then 
-                    interact(p) 
-                    addLog("Fed Horse #" .. targetIndex) 
-                    targetIndex = (targetIndex % #POS_HORSES) + 1
-                    task.wait(_G.Flow_FarmSpeed)
-                else
-                    targetIndex = (targetIndex % #POS_HORSES) + 1 -- Skip if no prompt
-                end
-            end
-
-        elseif _G.Flow_SelectedJob == "Construction" then
-            -- JOB 2: CONSTRUCTION
-            local hasItem = Player.Backpack:FindFirstChild("CementBag") or (Player.Character and Player.Character:FindFirstChild("CementBag"))
-            if not hasItem then
-                root.CFrame = CFrame.new(POS_CEMENT + Vector3.new(0, 1, 0))
-                task.wait(0.5)
-                local p = findPrompt({"Cement", "Bag", "Grab"})
-                if p then interact(p) addLog("Grabbed Cement") task.wait(_G.Flow_FarmSpeed) end
-            else
-                local target = POS_MIXERS[targetIndex]
-                root.CFrame = CFrame.new(target + Vector3.new(0, 1, 0))
-                task.wait(0.5)
-                local p = findPrompt({"Pour", "Mixer", "Deliver"})
-                if p then 
-                    interact(p) 
-                    addLog("Poured Mixer #" .. targetIndex) 
-                    targetIndex = (targetIndex % #POS_MIXERS) + 1
-                    task.wait(_G.Flow_FarmSpeed)
-                else
-                    targetIndex = (targetIndex % #POS_MIXERS) + 1
+        -- Auto Refuel Check
+        if FlowConfig.AutoRefuel then
+            local veh = getVehicle()
+            if veh then
+                local fuel = veh:FindFirstChild("Fuel") or veh:FindFirstChild("Gas")
+                if fuel and fuel:IsA("NumberValue") and fuel.Value < 20 then
+                    addLog("Low fuel. Routing to Gas Station...")
+                    if tweenTo(TP.GasStation) then
+                        task.wait(1)
+                        if interactPrompts({"fill", "refuel", "gas"}, 5) then
+                            addLog("Vehicle Refueled!")
+                        end
+                    end
                 end
             end
         end
-        task.wait(0.1)
+
+        local item = Player.Backpack:FindFirstChild("Wheat") or Player.Backpack:FindFirstChild("CementBag")
+        if not item and Player.Character then
+            item = Player.Character:FindFirstChild("Wheat") or Player.Character:FindFirstChild("CementBag")
+        end
+
+        if FlowConfig.Job == "Haybales" then
+            if not item then
+                if tweenTo(TP.HaySupply) then
+                    task.wait(0.2)
+                    if interactPrompts({"wheat", "hay", "grab", "take"}) then addLog("Grabbed Hay") end
+                end
+            else
+                local tgt = Targets.Horses[Session.TargetIndex] or Targets.Horses[1]
+                if tweenTo(tgt) then
+                    task.wait(0.2)
+                    if interactPrompts({"feed", "horse", "deliver", "give"}) then
+                        addLog("Fed Horse #" .. Session.TargetIndex)
+                        Session.TargetIndex = (Session.TargetIndex % #Targets.Horses) + 1
+                    end
+                end
+            end
+        elseif FlowConfig.Job == "Construction" then
+            if not item then
+                if tweenTo(TP.CementSupply) then
+                    task.wait(0.2)
+                    if interactPrompts({"cement", "bag", "grab", "take"}) then addLog("Grabbed Cement") end
+                end
+            else
+                local tgt = Targets.Mixers[Session.TargetIndex] or Targets.Mixers[1]
+                if tweenTo(tgt) then
+                    task.wait(0.2)
+                    if interactPrompts({"pour", "mixer", "deliver", "insert"}) then
+                        addLog("Poured Mixer #" .. Session.TargetIndex)
+                        Session.TargetIndex = (Session.TargetIndex % #Targets.Mixers) + 1
+                    end
+                end
+            end
+        end
+        task.wait(FlowConfig.Speed)
     end
 end
 
--- UI INITIALIZATION
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local Window = Fluent:CreateWindow({
-    Title = "Flow Studio",
-    SubTitle = "V1.0.0 Alpha",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(540, 380),
-    Theme = "Dark"
-})
+-- ============= LOADING SCREEN =============
+local LoadingUI = (function()
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "FlowLoadingScreen"
+    sg.ResetOnSpawn = false
+    sg.IgnoreGuiInset = true
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.Parent = Services.CoreGui
 
--- UI TOGGLE BUTTON (Fix for minimized UI disappearing)
-local ToggleButton = Instance.new("ScreenGui")
-local MainButton = Instance.new("TextButton")
-ToggleButton.Name = "FlowToggle"
-ToggleButton.Parent = game.CoreGui
-MainButton.Name = "MainButton"
-MainButton.Parent = ToggleButton
-MainButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainButton.Position = UDim2.new(0, 10, 0.9, 0)
-MainButton.Size = UDim2.new(0, 80, 0, 30)
-MainButton.Font = Enum.Font.SourceSansBold
-MainButton.Text = "Flow: Open"
-MainButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-MainButton.TextSize = 14
-MainButton.MouseButton1Click:Connect(function() Window:Minimize() end)
+    local bg = Instance.new("Frame", sg)
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
 
-local Tabs = {
-    Home = Window:AddTab({ Title = "Home", Icon = "home" }),
-    Main = Window:AddTab({ Title = "Automation", Icon = "tractor" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+    local container = Instance.new("Frame", bg)
+    container.Size = UDim2.new(0, 420, 0, 280)
+    container.Position = UDim2.new(0.5, -210, 0.5, -140)
+    container.BackgroundTransparency = 1
+
+    local title = Instance.new("TextLabel", container)
+    title.Size = UDim2.new(1, 0, 0, 50)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "FLOW STUDIO"
+    title.TextColor3 = Color3.fromRGB(138, 92, 226)
+    title.TextSize = 34
+
+    local statusText = Instance.new("TextLabel", container)
+    statusText.Size = UDim2.new(0, 320, 0, 20)
+    statusText.Position = UDim2.new(0.5, -160, 0, 158)
+    statusText.BackgroundTransparency = 1
+    statusText.Font = Enum.Font.Gotham
+    statusText.Text = "Initializing..."
+    statusText.TextColor3 = Color3.fromRGB(180, 180, 200)
+    statusText.TextSize = 12
+
+    local barBg = Instance.new("Frame", container)
+    barBg.Size = UDim2.new(0, 320, 0, 6)
+    barBg.Position = UDim2.new(0.5, -160, 0, 140)
+    barBg.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+
+    local barFill = Instance.new("Frame", barBg)
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(138, 92, 226)
+
+    return {ScreenGui = sg, BarFill = barFill, StatusText = statusText}
+end)()
+
+local LoadingPhases = {
+    { p = 20, s = "Connecting to game...", d = 0.5 },
+    { p = 45, s = "Scanning Server for Staff...", d = 0.8 },
+    { p = 80, s = "Loading Modules...", d = 0.5 },
+    { p = 100, s = "Ready!", d = 0.4 }
 }
 
--- HOME TAB
-Tabs.Home:AddParagraph({ Title = "Flow Studio Alpha", Content = "Developed by Theo. Optimized for Eagle Nation." })
-local ActivityLog = Tabs.Home:AddParagraph({ Title = "Activity Log", Content = "System Standby" })
-
-task.spawn(function()
-    while task.wait(2) do
-        local cur = (pStats and pStats:FindFirstChild("Money")) and pStats.Money.Value or 0
-        ActivityLog:SetValues({Content = "Profit: $" .. (cur - StartMoney) .. "\n\n" .. table.concat(RecentActivity, "\n")})
-    end
-end)
-
--- AUTOMATION TAB
-Tabs.Main:AddDropdown("JobSelect", {
-    Title = "Select Work Type",
-    Values = {"Haybales", "Construction"},
-    Default = "Haybales",
-    Callback = function(v) _G.Flow_SelectedJob = v targetIndex = 1 end
-})
-
-Tabs.Main:AddToggle("FarmToggle", {
-    Title = "Execute Auto Farm",
-    Default = false,
-    Callback = function(state)
-        _G.Flow_AutoFarm = state
-        if state then task.spawn(MainEngine) end
-    end
-})
-
-Tabs.Main:AddSlider("Delay", {
-    Title = "Action Delay",
-    Default = 1.0, Min = 0.1, Max = 5.0, Rounding = 1,
-    Callback = function(v) _G.Flow_FarmSpeed = v end
-})
-
--- SETTINGS TAB
-Tabs.Settings:AddToggle("Perf", {
-    Title = "Performance Mode",
-    Default = false,
-    Callback = function(v)
-        _G.Flow_PerformanceMode = v
-        if v then
-            Lighting.GlobalShadows = false
-            for _, o in pairs(workspace:GetDescendants()) do
-                if o:IsA("BasePart") then o.Material = Enum.Material.SmoothPlastic end
+-- ============= INITIALIZATION & UI =============
+local function StartSystem()
+    -- 1. Linear Loading & Security Check
+    for _, phase in ipairs(LoadingPhases) do
+        task.wait(phase.d)
+        Services.TweenService:Create(LoadingUI.BarFill, TweenInfo.new(0.3), {Size = UDim2.new(phase.p / 100, 0, 1, 0)}):Play()
+        LoadingUI.StatusText.Text = phase.s
+        
+        -- Cek staff diam-diam saat loading
+        if phase.p == 45 then
+            for _, plr in ipairs(Services.Players:GetPlayers()) do
+                if plr ~= Player and isStaff(plr) then
+                    RunSecurityProtocol(plr.Name)
+                    return -- Hentikan inisialisasi
+                end
             end
         end
     end
-})
 
-Tabs.Settings:AddToggle("AFK", { Title = "Anti AFK", Default = true })
-Tabs.Settings:AddToggle("Recon", { Title = "Auto Reconnect", Default = true, Callback = function(v) _G.Flow_AutoReconnect = v end })
+    LoadingUI.ScreenGui:Destroy()
 
--- OVERLAY FIX (NO STUCK)
-local Overlay = Instance.new("ScreenGui", game.CoreGui)
-local Frame = Instance.new("Frame", Overlay)
-Frame.Size = UDim2.new(0, 180, 0, 25)
-Frame.Position = UDim2.new(0.5, -90, 0, 5)
-Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-Frame.Active = true
-Frame.Draggable = true
+    -- 2. Load Fluent UI
+    local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+    local Window = Fluent:CreateWindow({
+        Title = "Flow Studio", SubTitle = "V1.3.5 Ultimate",
+        TabWidth = 160, Size = UDim2.fromOffset(580, 440), Theme = "Darker"
+    })
 
-local StatText = Instance.new("TextLabel", Frame)
-StatText.Size = UDim2.new(1, 0, 1, 0)
-StatText.BackgroundTransparency = 1
-StatText.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatText.Font = Enum.Font.Code
-StatText.TextSize = 10
+    local Tabs = {
+        Home = Window:AddTab({ Title = "Home", Icon = "home" }),
+        Main = Window:AddTab({ Title = "Automation", Icon = "tractor" }),
+        Teleport = Window:AddTab({ Title = "Teleport", Icon = "map" }),
+        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+    }
 
-RunService.Heartbeat:Connect(function(dt)
-    local fps = math.floor(1/dt)
-    local ping = math.floor(Player:GetNetworkPing() * 1000)
-    StatText.Text = string.format("%d ms • %0.1f ms • %d fps", ping, Stats.PerformanceStats.CPU:GetValue(), fps)
-end)
+    -- UI Elements
+    local logParagraph = Tabs.Home:AddParagraph({ Title = "System Log", Content = "Standby..." })
+    task.spawn(function()
+        while task.wait(1) do
+            local curMoney = (pStats and pStats:FindFirstChild("Money")) and pStats.Money.Value or 0
+            Session.CurrentProfit = curMoney - Session.StartMoney
+            logParagraph:SetValues({ Content = "Profit: $" .. Session.CurrentProfit .. "\n\n" .. table.concat(Session.Logs, "\n") })
+        end
+    end)
 
-Window:SelectTab(1)
-addLog("V1.0.0 Alpha Ready")
+    Tabs.Main:AddDropdown("JobSelect", {
+        Title = "Job", Values = {"Haybales", "Construction"}, Default = FlowConfig.Job,
+        Callback = function(v) FlowConfig.Job = v; Session.TargetIndex = 1 end
+    })
+
+    Tabs.Main:AddToggle("FarmTgl", {
+        Title = "Enable Automation", Default = false,
+        Callback = function(v) FlowConfig.AutoFarm = v; if v then task.spawn(runFarmCycle) end end
+    })
+
+    Tabs.Main:AddToggle("RefuelTgl", {
+        Title = "Auto Refuel (<20%)", Default = false,
+        Callback = function(v) FlowConfig.AutoRefuel = v end
+    })
+
+    Tabs.Teleport:AddButton({ Title = "Haybales Job", Callback = function() tweenTo(TP.JobHorse) end })
+    Tabs.Teleport:AddButton({ Title = "Construction Job", Callback = function() tweenTo(TP.JobConst) end })
+
+    Tabs.Settings:AddInput("WebURL", { Title = "Discord Webhook", Callback = function(v) FlowConfig.WebhookURL = v end })
+    Tabs.Settings:AddInput("DiscID", { Title = "Discord User ID (@)", Callback = function(v) FlowConfig.DiscordID = v end })
+    Tabs.Settings:AddToggle("ReconTgl", { Title = "Auto Reconnect", Default = true, Callback = function(v) FlowConfig.AutoReconnect = v end })
+
+    -- 3. Persistence Mode Logic
+    local function ApplyMods()
+        local char = Player.Character or Player.CharacterAdded:Wait()
+        task.wait(0.5)
+        if FlowConfig.StreamerMode then
+            for _, obj in ipairs(char:GetDescendants()) do
+                if (obj:IsA("BasePart") or obj:IsA("Decal")) and not obj:FindFirstAncestorOfClass("Tool") then
+                    obj.Transparency = 1
+                end
+            end
+        end
+    end
+
+    Tabs.Settings:AddToggle("StreamTgl", {
+        Title = "Streamer Mode", Default = false,
+        Callback = function(v) FlowConfig.StreamerMode = v; ApplyMods() end
+    })
+
+    Player.CharacterAdded:Connect(ApplyMods)
+
+    -- 4. Anti-AFK
+    pcall(function()
+        Player.Idled:Connect(function()
+            Services.VirtualUser:CaptureController()
+            Services.VirtualUser:ClickButton2(Vector2.new())
+        end)
+    end)
+
+    Window:SelectTab(1)
+    addLog("V1.3.5 Ultimate Ready")
+end
+
+-- Eksekusi Boot
+StartSystem()
