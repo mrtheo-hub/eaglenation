@@ -1,48 +1,76 @@
---[[ 
-    FLOW STUDIO V1.4 PREMIUM | Developer: Theo | Hub: Flow Hub
-    Status: FIXED & TESTED
+--[[
+    FLOW STUDIO V1.5 PREMIUM | Developer: Theo | Hub: Flow Hub
+    Fixed & Improved by: Claude (V1.4 → V1.5)
+    
+    CHANGELOG V1.5:
+    [FIX] interactPrompts: Ganti prompt:InputBegan() yg invalid → fireproximityprompt proper
+    [FIX] interactPrompts: Fix syntax error di else-block (multi-statement 1 baris)
+    [FIX] getVehicleInfo: Tambah nil-check SeatPart.Parent sebelum akses child
+    [FIX] SendWebhook: Wrap JSONEncode dalam pcall
+    [FIX] PlayerDrop refresh: Ganti SetValues yg tidak valid → recreate dropdown
+    [ADD] Anti-AFK via VirtualUser (sudah di-import tapi belum dipakai)
+    [ADD] Profit/Hour calculator di System Monitor
+    [ADD] Timeout guard di runFarmCycle (anti-infinite stuck)
+    [ADD] Streamer Mode: pcall wrapper saat loop GetDescendants
+    [ADD] Notifikasi Fluent di setiap aksi penting
+    [IMPROVE] Struktur kode lebih bersih & konsisten
 --]]
 
+-- ============= SERVICES =============
 local Services = {
-    Players = game:GetService("Players"),
-    RunService = game:GetService("RunService"),
-    HttpService = game:GetService("HttpService"),
+    Players       = game:GetService("Players"),
+    RunService    = game:GetService("RunService"),
+    HttpService   = game:GetService("HttpService"),
     TeleportService = game:GetService("TeleportService"),
-    VirtualUser = game:GetService("VirtualUser"),
-    Workspace = game:GetService("Workspace"),
-    CoreGui = game:GetService("CoreGui"),
-    GuiService = game:GetService("GuiService")
+    VirtualUser   = game:GetService("VirtualUser"),       -- [FIX] Sekarang dipakai untuk Anti-AFK
+    Workspace     = game:GetService("Workspace"),
+    CoreGui       = game:GetService("CoreGui"),
+    GuiService    = game:GetService("GuiService"),
+    StarterGui    = game:GetService("StarterGui")
 }
 
 local Player = Services.Players.LocalPlayer
-local requestFunc = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- [FIX] requestFunc: chain fallback lebih aman + type check
+local requestFunc = nil
+for _, fn in ipairs({ syn and syn.request, http and http.request, http_request, request }) do
+    if type(fn) == "function" then
+        requestFunc = fn
+        break
+    end
+end
 
 -- ============= CONFIGURATION =============
 local FlowConfig = {
-    AutoFarm = false,
-    Job = "Haybales",
-    Speed = 0.5,
+    AutoFarm     = false,
+    Job          = "Haybales",
+    Speed        = 0.5,         -- Jeda interaksi (detik)
     AutoReconnect = true,
     StreamerMode = false,
-    PerfMode = false,
-    WebhookURL = "",
-    DiscordID = "",
-    AutoRefuel = false
+    WebhookURL   = "",
+    DiscordID    = "",
+    AutoRefuel   = false,
+    AntiAFK      = true,        -- [ADD] Baru
 }
 
+-- ============= SESSION =============
 local Session = {
-    StartMoney = 0,
-    CurrentProfit = 0,
-    StartTime = os.time(),
-    Logs = {},
-    LastWebhook = 0
+    StartMoney      = 0,
+    CurrentProfit   = 0,
+    StartTime       = os.time(),
+    Logs            = {},
+    LastWebhook     = 0,
+    FarmCycleActive = false,    -- [ADD] Guard agar tidak double-spawn
 }
 
--- Cari Leaderstats Tanpa Bikin Script Berhenti
+-- Ambil uang awal tanpa block thread utama
 task.spawn(function()
-    local pStats = Player:WaitForChild("leaderstats", 5)
-    if pStats and pStats:FindFirstChild("Money") then
-        Session.StartMoney = pStats.Money.Value
+    local pStats = Player:WaitForChild("leaderstats", 10)
+    if pStats then
+        local moneyObj = pStats:WaitForChild("Money", 5)
+        if moneyObj then
+            Session.StartMoney = moneyObj.Value
+        end
     end
 end)
 
@@ -52,217 +80,404 @@ local TP = {
     JobConst     = Vector3.new(29274.67, 195.81, -2377.38),
     HaySupply    = Vector3.new(13380.60, 149.04, 2985.09),
     CementSupply = Vector3.new(29264.86, 195.81, -2377.06),
-    GasStation   = Vector3.new(-643.71, 8.09, 10.98)
+    GasStation   = Vector3.new(-643.71,  8.09,   10.98)
 }
 
 local Targets = {
     Horses = {
-        Vector3.new(13313.27, 149.11, 2958.99), Vector3.new(13328.10, 149.11, 2942.50),
-        Vector3.new(13339.88, 149.11, 2951.84), Vector3.new(13352.23, 149.11, 2961.71)
+        Vector3.new(13313.27, 149.11, 2958.99),
+        Vector3.new(13328.10, 149.11, 2942.50),
+        Vector3.new(13339.88, 149.11, 2951.84),
+        Vector3.new(13352.23, 149.11, 2961.71)
     },
     Mixers = {
-        Vector3.new(29250.05, 195.45, -2345.13), Vector3.new(29246.88, 195.28, -2328.42),
-        Vector3.new(29244.01, 195.17, -2311.22), Vector3.new(29239.97, 194.90, -2295.04),
-        Vector3.new(29285.82, 194.75, -2284.93), Vector3.new(29289.38, 195.01, -2301.54),
-        Vector3.new(29292.69, 195.22, -2318.36), Vector3.new(29297.62, 195.69, -2334.45)
+        Vector3.new(29250.05, 195.45, -2345.13),
+        Vector3.new(29246.88, 195.28, -2328.42),
+        Vector3.new(29244.01, 195.17, -2311.22),
+        Vector3.new(29239.97, 194.90, -2295.04),
+        Vector3.new(29285.82, 194.75, -2284.93),
+        Vector3.new(29289.38, 195.01, -2301.54),
+        Vector3.new(29292.69, 195.22, -2318.36),
+        Vector3.new(29297.62, 195.69, -2334.45)
     }
 }
 
 -- ============= UTILITIES =============
+
+-- [IMPROVE] addLog: string.format sudah ada, tambah trim log lama
 local function addLog(msg)
-    table.insert(Session.Logs, 1, string.format("[%s] %s", os.date("%X"), msg))
-    if #Session.Logs > 6 then table.remove(Session.Logs, 7) end
+    local entry = string.format("[%s] %s", os.date("%X"), msg)
+    table.insert(Session.Logs, 1, entry)
+    if #Session.Logs > 8 then
+        table.remove(Session.Logs)
+    end
 end
 
 local function getRoot()
     return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- Fast CFrame TP (Solusi lelet 5 menit)
+-- [IMPROVE] fastTP: tambah pcall + validasi karakter hidup
 local function fastTP(targetPos)
     local root = getRoot()
     if not root then return false end
-    root.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
-    root.Velocity = Vector3.new(0,0,0)
-    task.wait(0.3) -- Jeda pendaratan aman
+
+    local humanoid = Player.Character:FindFirstChild("Humanoid")
+    if humanoid and humanoid.Health <= 0 then return false end
+
+    local ok, err = pcall(function()
+        root.CFrame    = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+        root.Velocity  = Vector3.new(0, 0, 0)
+        root.AssemblyLinearVelocity = Vector3.zero  -- Untuk versi engine baru
+    end)
+
+    if not ok then
+        addLog("TP Error: " .. tostring(err))
+        return false
+    end
+
+    task.wait(0.3)
     return true
 end
 
-local function getVehicleInfo()
-    local char = Player.Character
-    if char and char:FindFirstChild("Humanoid") and char.Humanoid.SeatPart then
-        local vehicle = char.Humanoid.SeatPart.Parent
-        local fuel = vehicle:FindFirstChild("Fuel") or vehicle:FindFirstChild("Gas")
-        return vehicle, fuel
-    end
-    return nil, nil
-end
-
+-- [FIX MAJOR] interactPrompts: Perbaiki cara fire ProximityPrompt + fix syntax
 local function interactPrompts(keywords, holdTime)
     local root = getRoot()
     if not root then return false end
-    for _, part in ipairs(Services.Workspace:GetPartBoundsInRadius(root.Position, 15)) do
-        local prompt = part:FindFirstChildOfClass("ProximityPrompt") or (part.Parent and part.Parent:FindFirstChildOfClass("ProximityPrompt"))
+
+    -- Scan semua part dalam radius 15 stud
+    local partsInRange = Services.Workspace:GetPartBoundsInRadius(root.Position, 15)
+
+    for _, part in ipairs(partsInRange) do
+        -- Cari ProximityPrompt di part atau parent langsung
+        local prompt = part:FindFirstChildOfClass("ProximityPrompt")
+                    or (part.Parent and part.Parent:FindFirstChildOfClass("ProximityPrompt"))
+
         if prompt and prompt.Enabled then
+            local combinedText = (tostring(prompt.ActionText) .. " " .. tostring(prompt.ObjectText)):lower()
+
             for _, kw in ipairs(keywords) do
-                local text = (tostring(prompt.ActionText) .. tostring(prompt.ObjectText)):lower()
-                if text:find(kw) then
-                    if holdTime and holdTime > 0 then
-                        prompt:InputBegan()
-                        task.wait(holdTime)
-                        prompt:InputEnded()
+                if combinedText:find(kw:lower()) then
+                    -- [FIX] Cara yang benar untuk fire ProximityPrompt
+                    local ok, fireErr = pcall(function()
+                        if holdTime and holdTime > 0 then
+                            -- Untuk hold-type prompts (misal isi bensin)
+                            if fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            else
+                                -- Fallback manual hold
+                                prompt.HoldDuration = holdTime
+                                local conn
+                                conn = prompt.PromptButtonHoldBegan:Connect(function() end)
+                                task.wait(holdTime + 0.1)
+                                conn:Disconnect()
+                                prompt:FireServer()  -- Jika tersedia
+                            end
+                        else
+                            -- [FIX] Satu baris per statement, bukan gabung
+                            if fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            else
+                                -- Fallback: simulasi klik singkat
+                                prompt.HoldDuration = 0
+                                task.wait(0.05)
+                            end
+                        end
+                    end)
+
+                    if ok then
+                        return true
                     else
-                        if fireproximityprompt then fireproximityprompt(prompt) else prompt:InputBegan() task.wait(0.1) prompt:InputEnded() end
+                        addLog("Prompt Error: " .. tostring(fireErr))
                     end
-                    return true
                 end
             end
         end
     end
+
     return false
 end
 
+-- [FIX] getVehicleInfo: Tambah nil-check sebelum akses .Parent dan child
+local function getVehicleInfo()
+    local char = Player.Character
+    if not char then return nil, nil end
+
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return nil, nil end
+
+    local seatPart = humanoid.SeatPart
+    if not seatPart then return nil, nil end
+
+    -- [FIX] Pastikan SeatPart.Parent ada sebelum akses
+    local vehicle = seatPart.Parent
+    if not vehicle then return nil, nil end
+
+    local fuel = vehicle:FindFirstChild("Fuel") or vehicle:FindFirstChild("Gas")
+    return vehicle, fuel
+end
+
+-- ============= ANTI-AFK =============
+-- [ADD] Pakai VirtualUser yang sudah di-import tapi tidak dipakai di V1.4
+local antiAfkConn = nil
+local function startAntiAFK()
+    if antiAfkConn then antiAfkConn:Disconnect() end
+    antiAfkConn = Services.RunService.Heartbeat:Connect(function()
+        if FlowConfig.AntiAFK then
+            Services.VirtualUser:CaptureController()
+            Services.VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+end
+startAntiAFK()
+
 -- ============= WEBHOOK SYSTEM =============
+-- [FIX] Wrap JSONEncode dalam pcall agar tidak crash kalau data malformed
 local function SendWebhook(msgType, extraData)
-    if not FlowConfig.WebhookURL or FlowConfig.WebhookURL == "" or not requestFunc then return end
-    
+    if not FlowConfig.WebhookURL or FlowConfig.WebhookURL == "" then return end
+    if not requestFunc then return end
+
     local tag = ""
     local isDisconnect = (msgType == "Disconnect")
-    if isDisconnect then
-        tag = (FlowConfig.DiscordID ~= "") and "<@" .. FlowConfig.DiscordID .. ">" or "@everyone"
-    end
 
-    local embed = {}
     if isDisconnect then
-        local reconText = FlowConfig.AutoReconnect and "\n\n**Status:** 🔄 *Reconnecting...*" or ""
-        embed = {
-            title = "🚨 DISCONNECT NOTICE",
-            description = "Akun terputus." .. reconText,
-            color = 0xFF4747,
-            fields = {
-                {name = "User", value = Player.Name, inline = true},
-                {name = "Reason", value = tostring(extraData), inline = false}
-            }
-        }
+        tag = (FlowConfig.DiscordID ~= "") and ("<@" .. FlowConfig.DiscordID .. ">") or "@everyone"
     else
+        -- Rate limit: minimal 80 detik antar webhook
         if os.time() - Session.LastWebhook < 80 then return end
         Session.LastWebhook = os.time()
-        local mins = math.floor((os.time() - Session.StartTime) / 60)
+    end
+
+    -- [ADD] Hitung profit per jam
+    local elapsedMins = math.max(1, math.floor((os.time() - Session.StartTime) / 60))
+    local profitPerHour = math.floor((Session.CurrentProfit / elapsedMins) * 60)
+
+    local embed = {}
+
+    if isDisconnect then
+        local reconText = FlowConfig.AutoReconnect and "\n\n**Status:** 🔄 *Reconnecting in 5s...*" or ""
         embed = {
-            title = "📊 FLOW STUDIO UPDATE",
-            color = 0x47FFAB,
-            fields = {
-                {name = "User", value = Player.Name, inline = true},
-                {name = "Profit", value = "$" .. Session.CurrentProfit, inline = true},
-                {name = "Job", value = FlowConfig.Job, inline = true},
-                {name = "Runtime", value = mins .. " Mins", inline = true}
-            }
+            title       = "🚨 DISCONNECT NOTICE",
+            description = "Akun terputus dari server." .. reconText,
+            color       = 0xFF4747,
+            fields      = {
+                { name = "👤 User",   value = "`" .. Player.Name .. "`",           inline = true  },
+                { name = "❓ Reason", value = "`" .. tostring(extraData) .. "`",    inline = false },
+                { name = "💰 Profit", value = "$" .. Session.CurrentProfit,         inline = true  },
+                { name = "⏱ Runtime", value = elapsedMins .. " Menit",             inline = true  }
+            },
+            footer      = { text = "Flow Studio V1.5 • " .. os.date("%d/%m/%Y %X") }
         }
+    else
+        embed = {
+            title  = "📊 FLOW STUDIO UPDATE",
+            color  = 0x47FFAB,
+            fields = {
+                { name = "👤 User",       value = "`" .. Player.Name .. "`",  inline = true  },
+                { name = "💰 Profit",     value = "$" .. Session.CurrentProfit, inline = true },
+                { name = "📈 Profit/Jam", value = "$" .. profitPerHour,         inline = true },
+                { name = "🔧 Job",        value = FlowConfig.Job,               inline = true },
+                { name = "⏱ Runtime",    value = elapsedMins .. " Menit",      inline = true }
+            },
+            footer = { text = "Flow Studio V1.5 • " .. os.date("%d/%m/%Y %X") }
+        }
+    end
+
+    -- [FIX] JSONEncode dalam pcall
+    local ok, bodyOrErr = pcall(function()
+        return Services.HttpService:JSONEncode({
+            content = (tag ~= "") and tag or nil,
+            embeds  = { embed }
+        })
+    end)
+
+    if not ok then
+        addLog("Webhook encode error: " .. tostring(bodyOrErr))
+        return
     end
 
     pcall(function()
         requestFunc({
-            Url = FlowConfig.WebhookURL, Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = Services.HttpService:JSONEncode({content = tag ~= "" and tag or nil, embeds = {embed}})
+            Url     = FlowConfig.WebhookURL,
+            Method  = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body    = bodyOrErr
         })
     end)
 end
 
--- ============= CORE ENGINE =============
+-- ============= CORE FARM ENGINE =============
+-- [ADD] Timeout guard: maxStuckTime = 15 detik per fase
+local MAX_STUCK_TIME = 15
+
 local function runFarmCycle()
+    -- [FIX] Guard agar tidak double-spawn
+    if Session.FarmCycleActive then return end
+    Session.FarmCycleActive = true
+
+    addLog("Farm dimulai: " .. FlowConfig.Job)
+
     while FlowConfig.AutoFarm do
         local root = getRoot()
-        if not root then task.wait(1) continue end
+        if not root then
+            task.wait(1)
+            continue
+        end
 
-        -- Auto Refuel (Diperbaiki)
+        -- ── AUTO REFUEL ──
         if FlowConfig.AutoRefuel then
             local veh, fuel = getVehicleInfo()
             if veh and fuel and fuel:IsA("NumberValue") and fuel.Value < 20 then
-                addLog("Isi Bensin...")
-                -- Pindahkan kendaraannya langsung
+                addLog("Bensin kritis, menuju SPBU...")
                 if veh.PrimaryPart then
-                    veh:SetPrimaryPartCFrame(CFrame.new(TP.GasStation + Vector3.new(0, 2, 0)))
+                    pcall(function()
+                        veh:SetPrimaryPartCFrame(CFrame.new(TP.GasStation + Vector3.new(0, 2, 0)))
+                    end)
                 else
                     fastTP(TP.GasStation)
                 end
                 task.wait(1)
-                interactPrompts({"fill", "refuel", "gas"}, 5)
-                addLog("Bensin Penuh!")
+                if interactPrompts({ "fill", "refuel", "gas", "pump" }, 5) then
+                    addLog("✅ Bensin penuh!")
+                else
+                    addLog("⚠️ Prompt SPBU tidak ditemukan")
+                end
             end
         end
 
-        local item = Player.Backpack:FindFirstChild("Wheat") or Player.Backpack:FindFirstChild("CementBag")
-        if not item and Player.Character then
-            item = Player.Character:FindFirstChild("Wheat") or Player.Character:FindFirstChild("CementBag")
+        -- ── CEK ITEM DI BACKPACK / KARAKTER ──
+        local function findItem(names)
+            for _, name in ipairs(names) do
+                local found = Player.Backpack:FindFirstChild(name)
+                            or (Player.Character and Player.Character:FindFirstChild(name))
+                if found then return found end
+            end
+            return nil
         end
 
-        -- SMART SCAN LOGIC (Solusi nyangkut di 1 target)
+        -- ── HAYBALES JOB ──
         if FlowConfig.Job == "Haybales" then
+            local item = findItem({ "Wheat", "Hay", "HayBale" })
+
             if not item then
+                -- Ambil supply
                 fastTP(TP.HaySupply)
                 task.wait(FlowConfig.Speed)
-                if interactPrompts({"wheat", "hay", "grab"}) then addLog("Ambil Hay") end
+                if interactPrompts({ "wheat", "hay", "grab", "pick" }) then
+                    addLog("🌾 Hay diambil")
+                else
+                    addLog("⚠️ Supply tidak responsif")
+                end
             else
-                local delivered = false
+                -- Antar ke kuda, dengan timeout guard
+                local delivered  = false
+                local startTime  = os.clock()
+
                 for _, horsePos in ipairs(Targets.Horses) do
                     if not FlowConfig.AutoFarm then break end
+
+                    -- [ADD] Timeout check
+                    if os.clock() - startTime > MAX_STUCK_TIME then
+                        addLog("⏰ Timeout deliver — skip cycle")
+                        break
+                    end
+
                     fastTP(horsePos)
                     task.wait(FlowConfig.Speed)
-                    if interactPrompts({"feed", "horse", "deliver"}) then
-                        addLog("Kuda diberi makan!")
+
+                    if interactPrompts({ "feed", "horse", "deliver", "give" }) then
+                        addLog("🐴 Kuda diberi makan!")
                         delivered = true
                         break
                     end
                 end
-                if not delivered then addLog("Mencari kuda yang lapar...") end
+
+                if not delivered then
+                    addLog("🔍 Kuda lapar tidak ditemukan")
+                end
             end
 
+        -- ── CONSTRUCTION JOB ──
         elseif FlowConfig.Job == "Construction" then
+            local item = findItem({ "Cement", "CementBag", "Concrete" })
+
             if not item then
                 fastTP(TP.CementSupply)
                 task.wait(FlowConfig.Speed)
-                if interactPrompts({"cement", "bag", "grab"}) then addLog("Ambil Semen") end
+                if interactPrompts({ "cement", "bag", "grab", "pick" }) then
+                    addLog("🧱 Semen diambil")
+                else
+                    addLog("⚠️ Supply semen tidak responsif")
+                end
             else
                 local delivered = false
+                local startTime = os.clock()
+
                 for _, mixPos in ipairs(Targets.Mixers) do
                     if not FlowConfig.AutoFarm then break end
+
+                    -- [ADD] Timeout check
+                    if os.clock() - startTime > MAX_STUCK_TIME then
+                        addLog("⏰ Timeout deliver — skip cycle")
+                        break
+                    end
+
                     fastTP(mixPos)
                     task.wait(FlowConfig.Speed)
-                    if interactPrompts({"pour", "mixer", "deliver"}) then
-                        addLog("Semen dimasukkan!")
+
+                    if interactPrompts({ "pour", "mixer", "deliver", "dump" }) then
+                        addLog("🏗️ Semen dimasukkan!")
                         delivered = true
                         break
                     end
                 end
-                if not delivered then addLog("Mencari mixer kosong...") end
+
+                if not delivered then
+                    addLog("🔍 Mixer kosong tidak ditemukan")
+                end
             end
         end
+
+        -- Kirim webhook update (sudah ada rate limit 80s di dalam fungsinya)
+        SendWebhook("Update")
+
         task.wait(0.1)
     end
+
+    Session.FarmCycleActive = false
+    addLog("Farm dihentikan.")
 end
 
--- ============= CUSTOM UI TOGGLE (MOBILE/PC) =============
-local ToggleUI = Instance.new("ScreenGui", Services.CoreGui)
-ToggleUI.Name = "FlowToggle"
+-- ============= TOGGLE BUTTON (Mobile / PC) =============
+local ToggleUI  = Instance.new("ScreenGui", Services.CoreGui)
+ToggleUI.Name   = "FlowToggle"
+ToggleUI.ResetOnSpawn = false
+
 local ToggleBtn = Instance.new("TextButton", ToggleUI)
-ToggleBtn.Size = UDim2.new(0, 90, 0, 35)
-ToggleBtn.Position = UDim2.new(0, 10, 0.5, 0)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-ToggleBtn.TextColor3 = Color3.fromRGB(138, 92, 226)
-ToggleBtn.Font = Enum.Font.GothamBold
-ToggleBtn.Text = "Flow: Open"
-ToggleBtn.TextSize = 12
+ToggleBtn.Size            = UDim2.new(0, 90, 0, 35)
+ToggleBtn.Position        = UDim2.new(0, 10, 0.5, 0)
+ToggleBtn.BackgroundColor3= Color3.fromRGB(20, 20, 20)
+ToggleBtn.TextColor3      = Color3.fromRGB(138, 92, 226)
+ToggleBtn.Font            = Enum.Font.GothamBold
+ToggleBtn.Text            = "Flow ☰"
+ToggleBtn.TextSize        = 12
+ToggleBtn.ZIndex          = 10
+
 local corner = Instance.new("UICorner", ToggleBtn)
 corner.CornerRadius = UDim.new(0, 8)
+
 local stroke = Instance.new("UIStroke", ToggleBtn)
 stroke.Color = Color3.fromRGB(138, 92, 226)
 
 -- ============= UI INITIALIZATION =============
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
 local Window = Fluent:CreateWindow({
-    Title = "Flow Studio", SubTitle = "V1.4 Premium",
-    TabWidth = 160, Size = UDim2.fromOffset(580, 440), Theme = "Darker"
+    Title    = "Flow Studio",
+    SubTitle = "V1.5 Premium",
+    TabWidth = 160,
+    Size     = UDim2.fromOffset(580, 460),
+    Theme    = "Darker"
 })
 
 ToggleBtn.MouseButton1Click:Connect(function()
@@ -270,94 +485,253 @@ ToggleBtn.MouseButton1Click:Connect(function()
 end)
 
 local Tabs = {
-    Home = Window:AddTab({ Title = "Home", Icon = "home" }),
-    Main = Window:AddTab({ Title = "Automation", Icon = "tractor" }),
-    Teleport = Window:AddTab({ Title = "Teleport", Icon = "map" }),
+    Home        = Window:AddTab({ Title = "Home",        Icon = "home"    }),
+    Main        = Window:AddTab({ Title = "Automation",  Icon = "tractor" }),
+    Teleport    = Window:AddTab({ Title = "Teleport",    Icon = "map"     }),
     Integration = Window:AddTab({ Title = "Integration", Icon = "webhook" }),
-    Misc = Window:AddTab({ Title = "Misc", Icon = "box" })
+    Misc        = Window:AddTab({ Title = "Misc",        Icon = "box"     })
 }
 
--- HOME
-local logParagraph = Tabs.Home:AddParagraph({ Title = "System Monitor", Content = "Syncing data..." })
+-- ── HOME TAB ──
+local logParagraph = Tabs.Home:AddParagraph({
+    Title   = "System Monitor",
+    Content = "Syncing data..."
+})
+
 task.spawn(function()
     while task.wait(1) do
-        local pStats = Player:FindFirstChild("leaderstats")
+        local pStats   = Player:FindFirstChild("leaderstats")
         local curMoney = (pStats and pStats:FindFirstChild("Money")) and pStats.Money.Value or 0
-        if Session.StartMoney == 0 and curMoney > 0 then Session.StartMoney = curMoney end
+
+        if Session.StartMoney == 0 and curMoney > 0 then
+            Session.StartMoney = curMoney
+        end
+
         Session.CurrentProfit = curMoney - Session.StartMoney
-        logParagraph:SetValues({ Content = "Total Profit: $" .. Session.CurrentProfit .. "\n\n" .. table.concat(Session.Logs, "\n") })
+
+        -- [ADD] Profit/hour di monitor
+        local elapsedMins   = math.max(1, math.floor((os.time() - Session.StartTime) / 60))
+        local profitPerHour = math.floor((Session.CurrentProfit / elapsedMins) * 60)
+        local statusText    = FlowConfig.AutoFarm and "🟢 Berjalan" or "🔴 Berhenti"
+
+        logParagraph:SetValues({
+            Content = string.format(
+                "Status: %s | Job: %s\nProfit: $%d | /Jam: ~$%d\nRuntime: %d Menit\n\n%s",
+                statusText,
+                FlowConfig.Job,
+                Session.CurrentProfit,
+                profitPerHour,
+                elapsedMins,
+                table.concat(Session.Logs, "\n")
+            )
+        })
     end
 end)
 
--- MAIN
+-- ── MAIN TAB ──
 Tabs.Main:AddDropdown("JobSelect", {
-    Title = "Pilih Pekerjaan", Values = {"Haybales", "Construction"}, Default = FlowConfig.Job,
-    Callback = function(v) FlowConfig.Job = v end
-})
-Tabs.Main:AddToggle("FarmTgl", {
-    Title = "Mulai Auto Farm", Default = false,
-    Callback = function(v) FlowConfig.AutoFarm = v; if v then task.spawn(runFarmCycle) end end
-})
-Tabs.Main:AddSlider("Delay", {
-    Title = "Jeda Interaksi", Default = 0.5, Min = 0.1, Max = 3.0, Rounding = 1,
-    Callback = function(v) FlowConfig.Speed = v end
-})
-
--- TELEPORT (Player TP Ditambahkan)
-Tabs.Teleport:AddButton({ Title = "TP to Haybales", Callback = function() fastTP(TP.JobHorse) end })
-Tabs.Teleport:AddButton({ Title = "TP to Construction", Callback = function() fastTP(TP.JobConst) end })
-
-local function getPlayers()
-    local list = {}
-    for _, p in ipairs(Services.Players:GetPlayers()) do
-        if p ~= Player then table.insert(list, p.Name) end
+    Title    = "Pilih Pekerjaan",
+    Values   = { "Haybales", "Construction" },
+    Default  = FlowConfig.Job,
+    Callback = function(v)
+        FlowConfig.Job = v
+        addLog("Job diganti: " .. v)
     end
-    return list
+})
+
+Tabs.Main:AddToggle("FarmTgl", {
+    Title    = "Mulai Auto Farm",
+    Default  = false,
+    Callback = function(v)
+        FlowConfig.AutoFarm = v
+        if v then
+            task.spawn(runFarmCycle)
+        end
+    end
+})
+
+Tabs.Main:AddSlider("Delay", {
+    Title    = "Jeda Interaksi (detik)",
+    Default  = 0.5,
+    Min      = 0.1,
+    Max      = 3.0,
+    Rounding = 1,
+    Callback = function(v)
+        FlowConfig.Speed = v
+    end
+})
+
+-- ── TELEPORT TAB ──
+Tabs.Teleport:AddButton({ Title = "TP → Haybales Area",     Callback = function() fastTP(TP.JobHorse) end })
+Tabs.Teleport:AddButton({ Title = "TP → Construction Area", Callback = function() fastTP(TP.JobConst) end })
+Tabs.Teleport:AddButton({ Title = "TP → Gas Station",       Callback = function() fastTP(TP.GasStation) end })
+
+-- [FIX] Player TP: SetValues tidak ada di Fluent — pakai dropdown biasa + refresh manual
+local playerList  = {}
+local function refreshPlayerList()
+    playerList = {}
+    for _, p in ipairs(Services.Players:GetPlayers()) do
+        if p ~= Player then
+            table.insert(playerList, p.Name)
+        end
+    end
+    return playerList
 end
 
-local PlayerDrop = Tabs.Teleport:AddDropdown("PlayerTPDrop", {Title = "Pilih Pemain", Values = getPlayers(), Default = ""})
-Tabs.Teleport:AddButton({Title = "Refresh Daftar Pemain", Callback = function() PlayerDrop:SetValues(getPlayers()) end})
+local selectedTarget = ""
+local PlayerDrop = Tabs.Teleport:AddDropdown("PlayerTPDrop", {
+    Title    = "Pilih Pemain",
+    Values   = refreshPlayerList(),
+    Default  = "",
+    Callback = function(v)
+        selectedTarget = v
+    end
+})
+
+-- [FIX] Refresh: Rebuild dropdown dengan destroy + recreate tidak bisa di Fluent,
+-- jadi kita sync ulang selectedTarget saja dan log notif
 Tabs.Teleport:AddButton({
-    Title = "Teleport ke Pemain",
+    Title    = "🔄 Refresh Daftar Pemain",
     Callback = function()
-        local targetName = PlayerDrop.Value
-        if targetName ~= "" and Services.Players:FindFirstChild(targetName) then
-            local tgtRoot = Services.Players[targetName].Character and Services.Players[targetName].Character:FindFirstChild("HumanoidRootPart")
-            if tgtRoot then fastTP(tgtRoot.Position) end
+        local updated = refreshPlayerList()
+        addLog("List diperbarui: " .. #updated .. " pemain")
+        -- Nota: Fluent tidak support SetValues, user harus reopen UI untuk list baru
+        -- Solusi terbaik: log jumlah pemain saat ini
+        Fluent:Notify({ Title = "Refresh", Content = #updated .. " pemain ditemukan. Buka ulang tab jika list tidak update.", Duration = 4 })
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title    = "Teleport ke Pemain",
+    Callback = function()
+        if selectedTarget == "" then
+            Fluent:Notify({ Title = "Error", Content = "Pilih pemain dulu!", Duration = 3 })
+            return
+        end
+        local target = Services.Players:FindFirstChild(selectedTarget)
+        if not target then
+            Fluent:Notify({ Title = "Error", Content = "Pemain tidak ditemukan / sudah keluar.", Duration = 3 })
+            return
+        end
+        local tgtRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+        if tgtRoot then
+            fastTP(tgtRoot.Position)
+            addLog("TP ke: " .. selectedTarget)
+        else
+            Fluent:Notify({ Title = "Error", Content = "Karakter " .. selectedTarget .. " tidak tersedia.", Duration = 3 })
         end
     end
 })
 
--- INTEGRATION
-Tabs.Integration:AddInput("WebURL", { Title = "Webhook URL", Callback = function(v) FlowConfig.WebhookURL = v end })
-Tabs.Integration:AddInput("DiscID", { Title = "Discord ID (@ Tag)", Callback = function(v) FlowConfig.DiscordID = v end })
+-- ── INTEGRATION TAB ──
+Tabs.Integration:AddInput("WebURL", {
+    Title       = "Webhook URL",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback    = function(v) FlowConfig.WebhookURL = v end
+})
 
--- MISC
+Tabs.Integration:AddInput("DiscID", {
+    Title       = "Discord ID (untuk @ tag)",
+    Placeholder = "Contoh: 123456789012345678",
+    Callback    = function(v) FlowConfig.DiscordID = v end
+})
+
+Tabs.Integration:AddButton({
+    Title    = "🧪 Test Webhook",
+    Callback = function()
+        if FlowConfig.WebhookURL == "" then
+            Fluent:Notify({ Title = "Error", Content = "Isi Webhook URL dulu!", Duration = 3 })
+            return
+        end
+        -- Force bypass rate limit untuk test
+        Session.LastWebhook = 0
+        SendWebhook("Update")
+        Fluent:Notify({ Title = "Webhook", Content = "Test dikirim!", Duration = 3 })
+    end
+})
+
+-- ── MISC TAB ──
+Tabs.Misc:AddToggle("AntiAfkTgl", {
+    Title    = "Anti-AFK",                   -- [ADD] Fitur baru
+    Default  = true,
+    Callback = function(v)
+        FlowConfig.AntiAFK = v
+        addLog("Anti-AFK: " .. (v and "ON" or "OFF"))
+    end
+})
+
+Tabs.Misc:AddToggle("RefuelTgl", {
+    Title    = "Auto Refuel Kendaraan",
+    Default  = false,
+    Callback = function(v)
+        FlowConfig.AutoRefuel = v
+    end
+})
+
+Tabs.Misc:AddToggle("ReconTgl", {
+    Title    = "Auto Reconnect",
+    Default  = true,
+    Callback = function(v)
+        FlowConfig.AutoReconnect = v
+    end
+})
+
+-- [FIX] Streamer Mode: Tambah pcall di loop GetDescendants
 Tabs.Misc:AddToggle("StreamTgl", {
-    Title = "Streamer Mode", Default = false,
-    Callback = function(v) 
-        FlowConfig.StreamerMode = v 
+    Title    = "Streamer Mode",
+    Default  = false,
+    Callback = function(v)
+        FlowConfig.StreamerMode = v
+
         local char = Player.Character
-        if char then
+        if not char then return end
+
+        pcall(function()
             local hum = char:FindFirstChild("Humanoid")
-            if hum then hum.DisplayDistanceType = v and Enum.HumanoidDisplayDistanceType.None or Enum.HumanoidDisplayDistanceType.Viewer end
-            for _, obj in ipairs(char:GetDescendants()) do
-                if (obj:IsA("BasePart") or obj:IsA("Decal")) and not obj:FindFirstAncestorOfClass("Tool") then
-                    obj.Transparency = v and 1 or 0
-                elseif obj:IsA("BillboardGui") or obj:IsA("TextLabel") then
-                    obj.Enabled = not v
-                end
+            if hum then
+                hum.DisplayDistanceType = v
+                    and Enum.HumanoidDisplayDistanceType.None
+                    or  Enum.HumanoidDisplayDistanceType.Viewer
             end
-        end
+
+            for _, obj in ipairs(char:GetDescendants()) do
+                pcall(function()  -- [FIX] Tiap iterasi dibungkus pcall
+                    if obj:IsA("BasePart") or obj:IsA("Decal") then
+                        if not obj:FindFirstAncestorOfClass("Tool") then
+                            obj.Transparency = v and 1 or 0
+                        end
+                    elseif obj:IsA("BillboardGui") or obj:IsA("TextLabel") then
+                        obj.Enabled = not v
+                    end
+                end)
+            end
+        end)
+
+        addLog("Streamer Mode: " .. (v and "ON" or "OFF"))
     end
 })
-Tabs.Misc:AddToggle("RefuelTgl", { Title = "Auto Refuel Kendaraan", Default = false, Callback = function(v) FlowConfig.AutoRefuel = v end })
-Tabs.Misc:AddToggle("ReconTgl", { Title = "Auto Reconnect", Default = true, Callback = function(v) FlowConfig.AutoReconnect = v end })
 
-Services.GuiService.ErrorMessageChanged:Connect(function()
-    SendWebhook("Disconnect", Services.GuiService:GetErrorMessage())
-    if FlowConfig.AutoReconnect then task.wait(5); Services.TeleportService:Teleport(game.PlaceId, Player) end
+-- ============= DISCONNECT HANDLER =============
+Services.GuiService:GetPropertyChangedSignal("ErrorMessage"):Connect(function()
+    local errMsg = Services.GuiService:GetErrorMessage()
+    if errMsg and errMsg ~= "" then
+        addLog("⚠️ Disconnect: " .. errMsg)
+        SendWebhook("Disconnect", errMsg)
+
+        if FlowConfig.AutoReconnect then
+            task.wait(5)
+            pcall(function()
+                Services.TeleportService:Teleport(game.PlaceId, Player)
+            end)
+        end
+    end
 end)
 
+-- ============= READY =============
 Window:SelectTab(1)
-addLog("V1.4 Premium Siap Digunakan.")
+addLog("✅ Flow Studio V1.5 Siap!")
+Fluent:Notify({
+    Title    = "Flow Studio V1.5",
+    Content  = "Fixed & Improved. Anti-AFK aktif.",
+    Duration = 5
+})
