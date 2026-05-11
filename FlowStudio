@@ -1,23 +1,32 @@
--- FLOW STUDIO V1.7 | Developer: Theo | Hub: Flow Studio
+-- FLOW STUDIO V1.8 | Developer: Theo | Hub: Flow Hub
+-- V1.8: Fixed loading stuck, reqFunc nil, continue keyword, dropdown crash,
+--        holdTime, double CharacterAdded, notDone handler
 
 local Svc = {
-    Players         = game:GetService("Players"),
-    RunService      = game:GetService("RunService"),
-    HttpService     = game:GetService("HttpService"),
-    TeleportService = game:GetService("TeleportService"),
-    VirtualUser     = game:GetService("VirtualUser"),
-    Workspace       = game:GetService("Workspace"),
-    CoreGui         = game:GetService("CoreGui"),
-    GuiService      = game:GetService("GuiService"),
-    TweenService    = game:GetService("TweenService"),
-    UserInputService= game:GetService("UserInputService"),
-    Lighting        = game:GetService("Lighting"),
+    Players          = game:GetService("Players"),
+    RunService       = game:GetService("RunService"),
+    HttpService      = game:GetService("HttpService"),
+    TeleportService  = game:GetService("TeleportService"),
+    VirtualUser      = game:GetService("VirtualUser"),
+    Workspace        = game:GetService("Workspace"),
+    CoreGui          = game:GetService("CoreGui"),
+    GuiService       = game:GetService("GuiService"),
+    TweenService     = game:GetService("TweenService"),
+    UserInputService = game:GetService("UserInputService"),
+    Lighting         = game:GetService("Lighting"),
 }
 
 local LP = Svc.Players.LocalPlayer
-local reqFunc
-for _, f in ipairs({syn and syn.request, http and http.request, http_request, request}) do
-    if type(f) == "function" then reqFunc = f; break end
+
+-- [FIX] reqFunc: safe build, no nil-in-table ipairs issue
+local reqFunc = nil
+do
+    local candidates = {}
+    if syn and type(syn.request) == "function" then table.insert(candidates, syn.request) end
+    if http and type(http.request) == "function" then table.insert(candidates, http.request) end
+    if type(http_request) == "function" then table.insert(candidates, http_request) end
+    if type(request) == "function" then table.insert(candidates, request) end
+    reqFunc = candidates[1]
 end
 
 local Cfg = {
@@ -42,10 +51,12 @@ local Ses = {
 local Farm = { VH = {}, VM = {} }
 
 -- ─────────────────────────────────────────
---  LOADING SCREEN (tampil sebelum Fluent load)
+--  LOADING SCREEN
 -- ─────────────────────────────────────────
 local LoadGui = Instance.new("ScreenGui")
-LoadGui.Name, LoadGui.ResetOnSpawn, LoadGui.DisplayOrder = "FlowLoader", false, 999
+LoadGui.Name = "FlowLoader"
+LoadGui.ResetOnSpawn = false
+LoadGui.DisplayOrder = 999
 LoadGui.Parent = Svc.CoreGui
 
 local LBG = Instance.new("Frame", LoadGui)
@@ -53,25 +64,26 @@ LBG.Size = UDim2.fromScale(1, 1)
 LBG.BackgroundColor3 = Color3.fromRGB(8, 8, 14)
 LBG.BorderSizePixel = 0
 
-local function lbl(parent, text, size, color, posY, bold)
+local function mkLabel(parent, text, size, color, posY, bold)
     local l = Instance.new("TextLabel", parent)
     l.Size = UDim2.new(1, 0, 0, 40)
     l.Position = UDim2.new(0, 0, posY, 0)
     l.BackgroundTransparency = 1
     l.TextColor3 = color
     l.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
-    l.Text, l.TextSize = text, size
+    l.Text = text
+    l.TextSize = size
     return l
 end
 
-lbl(LBG, "FLOW STUDIO", 30, Color3.fromRGB(138, 92, 226), 0.34, true)
-lbl(LBG, "V1.7 PREMIUM  ·  by Theo", 12, Color3.fromRGB(120, 90, 180), 0.45, false)
-local LoadStat = lbl(LBG, "Initializing...", 11, Color3.fromRGB(90, 90, 110), 0.64, false)
+mkLabel(LBG, "FLOW STUDIO", 30, Color3.fromRGB(138, 92, 226), 0.34, true)
+mkLabel(LBG, "V1.8 PREMIUM  ·  by Theo", 12, Color3.fromRGB(120, 90, 180), 0.44, false)
+local LoadStat = mkLabel(LBG, "Initializing...", 11, Color3.fromRGB(90, 90, 120), 0.63, false)
 
 local BarBG = Instance.new("Frame", LBG)
 BarBG.Size = UDim2.new(0, 300, 0, 5)
 BarBG.Position = UDim2.new(0.5, -150, 0.57, 0)
-BarBG.BackgroundColor3 = Color3.fromRGB(30, 25, 45)
+BarBG.BackgroundColor3 = Color3.fromRGB(28, 22, 42)
 BarBG.BorderSizePixel = 0
 Instance.new("UICorner", BarBG).CornerRadius = UDim.new(1, 0)
 
@@ -81,25 +93,38 @@ BarFill.BackgroundColor3 = Color3.fromRGB(138, 92, 226)
 BarFill.BorderSizePixel = 0
 Instance.new("UICorner", BarFill).CornerRadius = UDim.new(1, 0)
 
-local function loadStep(pct, msg)
-    Svc.TweenService:Create(BarFill, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
-        Size = UDim2.new(pct, 0, 1, 0)
-    }):Play()
+-- targetPct: nilai yang akan kita animasi menuju
+local loadTarget = 0
+local function setLoadTarget(pct, msg)
+    loadTarget = pct
     LoadStat.Text = msg
-    task.wait(0.15)
 end
 
-loadStep(0.1, "Loading services...")
+-- [FIX] Animasi progress bar jalan di thread TERPISAH
+-- sehingga tidak freeze saat HttpGet blocking
+task.spawn(function()
+    while LoadGui.Parent do
+        local cur = BarFill.Size.X.Scale
+        if math.abs(cur - loadTarget) > 0.001 then
+            local next = cur + (loadTarget - cur) * 0.12
+            BarFill.Size = UDim2.new(next, 0, 1, 0)
+        end
+        task.wait(0.03)
+    end
+end)
+
+setLoadTarget(0.08, "Initializing...")
+task.wait(0.1)
 
 -- ─────────────────────────────────────────
 --  COORDINATES
 -- ─────────────────────────────────────────
 local TPos = {
-    JobHorse     = Vector3.new(13377.90, 149.05,  2997.01),
-    JobConst     = Vector3.new(29274.67, 195.81, -2377.38),
-    HaySupply    = Vector3.new(13380.60, 149.04,  2985.09),
-    CemSupply    = Vector3.new(29264.86, 195.81, -2377.06),
-    GasStation   = Vector3.new(-643.71,    8.09,    10.98),
+    JobHorse   = Vector3.new(13377.90, 149.05,  2997.01),
+    JobConst   = Vector3.new(29274.67, 195.81, -2377.38),
+    HaySupply  = Vector3.new(13380.60, 149.04,  2985.09),
+    CemSupply  = Vector3.new(29264.86, 195.81, -2377.06),
+    GasStation = Vector3.new(-643.71,    8.09,    10.98),
 }
 local Targets = {
     Horses = {
@@ -159,7 +184,7 @@ local function fastTP(pos)
     return true
 end
 
--- Deep prompt scanner: naik 5 level per part, scan semua children tiap level
+-- [FIX] holdTime sekarang benar-benar diteruskan ke fireproximityprompt
 local function fireNearby(keywords, holdTime)
     local root = getRoot()
     if not root then return false end
@@ -180,15 +205,20 @@ local function fireNearby(keywords, holdTime)
                             end
                         end
                         if match then
-                            local ok = pcall(function()
+                            local fired = pcall(function()
                                 if fireproximityprompt then
-                                    fireproximityprompt(ch)
+                                    -- [FIX] Teruskan holdTime ke fireproximityprompt jika ada
+                                    if holdTime and holdTime > 0 then
+                                        fireproximityprompt(ch, holdTime)
+                                    else
+                                        fireproximityprompt(ch)
+                                    end
                                 else
-                                    local dur = ch.HoldDuration
+                                    local dur = (holdTime and holdTime > 0) and holdTime or ch.HoldDuration
                                     if dur > 0 then task.wait(dur + 0.1) end
                                 end
                             end)
-                            if ok then return true end
+                            if fired then return true end
                         end
                     end
                 end
@@ -199,7 +229,7 @@ local function fireNearby(keywords, holdTime)
     return false
 end
 
-loadStep(0.25, "Setting up systems...")
+setLoadTarget(0.2, "Setting up systems...")
 
 -- ─────────────────────────────────────────
 --  ANTI-AFK
@@ -224,11 +254,6 @@ local function applyBoost(hum)
         hum.JumpPower = Cfg.JumpBoost and Cfg.JumpPower or 50
     end)
 end
-
-LP.CharacterAdded:Connect(function(c)
-    local h = c:WaitForChild("Humanoid", 5)
-    if h then task.wait(0.5); applyBoost(h) end
-end)
 
 -- ─────────────────────────────────────────
 --  NOCLIP
@@ -263,16 +288,16 @@ local function setFly(on)
     if not char then return end
     local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
     if not root or not hum then return end
-    if flyBV  then pcall(function() flyBV:Destroy() end);    flyBV = nil end
+    if flyBV    then pcall(function() flyBV:Destroy()    end); flyBV    = nil end
     if flyBGyro then pcall(function() flyBGyro:Destroy() end); flyBGyro = nil end
-
     if on then
         hum.PlatformStand = true
         flyBV = Instance.new("BodyVelocity", root)
-        flyBV.MaxForce, flyBV.Velocity = Vector3.new(1e5, 1e5, 1e5), Vector3.zero
+        flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        flyBV.Velocity = Vector3.zero
         flyBGyro = Instance.new("BodyGyro", root)
-        flyBGyro.MaxTorque, flyBGyro.P = Vector3.new(1e5, 1e5, 1e5), 1e4
-
+        flyBGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+        flyBGyro.P = 1e4
         flyConn = Svc.RunService.RenderStepped:Connect(function()
             if not Cfg.Fly or not flyBV or not flyBV.Parent then return end
             local cam = Svc.Workspace.CurrentCamera
@@ -280,20 +305,13 @@ local function setFly(on)
             local fwd = (UIS:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
             local rgt = (UIS:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
             local up  = (UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0)
-            flyBV.Velocity = (cam.CFrame.LookVector*fwd + cam.CFrame.RightVector*rgt + Vector3.new(0,1,0)*up) * Cfg.FlySpeed
+            flyBV.Velocity = (cam.CFrame.LookVector * fwd + cam.CFrame.RightVector * rgt + Vector3.new(0,1,0) * up) * Cfg.FlySpeed
             flyBGyro.CFrame = cam.CFrame
         end)
     else
         hum.PlatformStand = false
     end
 end
-
--- Re-apply fly/noclip on respawn
-LP.CharacterAdded:Connect(function()
-    task.wait(1)
-    if Cfg.Fly then setFly(true) end
-    if Cfg.Noclip then setNoclip(true) end
-end)
 
 -- ─────────────────────────────────────────
 --  GOD MODE
@@ -312,6 +330,17 @@ local function setGod(on)
     end
 end
 
+-- [FIX] Satu CharacterAdded untuk semua re-apply (menghindari race condition)
+LP.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid", 5)
+    if not hum then return end
+    task.wait(0.5)
+    applyBoost(hum)
+    if Cfg.Fly    then task.wait(0.1); setFly(true)    end
+    if Cfg.Noclip then task.wait(0.1); setNoclip(true) end
+    if Cfg.GodMode then setGod(true) end
+end)
+
 -- ─────────────────────────────────────────
 --  ESP
 -- ─────────────────────────────────────────
@@ -320,13 +349,12 @@ local function clearESP()
     for _, c in ipairs(espConns) do pcall(function() c:Disconnect() end) end
     espConns = {}
     for _, p in ipairs(Svc.Players:GetPlayers()) do
-        if p.Character then
+        if p ~= LP and p.Character then
             local h = p.Character:FindFirstChild("_FlowESP")
             if h then h:Destroy() end
         end
     end
 end
-
 local function addESP(p)
     if p == LP or not p.Character then return end
     if p.Character:FindFirstChild("_FlowESP") then return end
@@ -336,7 +364,6 @@ local function addESP(p)
     hl.FillTransparency, hl.OutlineTransparency = 0.5, 0
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 end
-
 local function setESP(on)
     clearESP()
     Cfg.ESP = on
@@ -344,7 +371,8 @@ local function setESP(on)
     for _, p in ipairs(Svc.Players:GetPlayers()) do addESP(p) end
     table.insert(espConns, Svc.Players.PlayerAdded:Connect(function(p)
         table.insert(espConns, p.CharacterAdded:Connect(function()
-            task.wait(1); if Cfg.ESP then addESP(p) end
+            task.wait(1)
+            if Cfg.ESP then addESP(p) end
         end))
     end))
 end
@@ -354,10 +382,10 @@ end
 -- ─────────────────────────────────────────
 local function setFPS(cap)
     Cfg.FPSCap = cap
-    local val = cap == "Unlimited" and 0 or tonumber(cap) or 60
+    local val = cap == "Unlimited" and math.huge or (tonumber(cap) or 60)
     if setfpscap then
-        pcall(setfpscap, val == 0 and math.huge or val)
-    else
+        pcall(setfpscap, val)
+    elseif type(settings) == "function" then
         pcall(function() settings().Rendering.FrameRateManager = Enum.FrameRateManagerMode.Disabled end)
     end
 end
@@ -375,7 +403,7 @@ local function setPerfMode(on)
     end)
 end
 
-loadStep(0.45, "Building farm engine...")
+setLoadTarget(0.4, "Building farm engine...")
 
 -- ─────────────────────────────────────────
 --  WEBHOOK
@@ -412,8 +440,10 @@ local function SendWebhook(typ, extra)
         },
     }
     local ok, body = pcall(Svc.HttpService.JSONEncode, Svc.HttpService, {content=tag, embeds={embed}})
-    if ok then pcall(reqFunc, {Url=Cfg.WebhookURL, Method="POST",
-        Headers={["Content-Type"]="application/json"}, Body=body}) end
+    if ok then
+        pcall(reqFunc, {Url=Cfg.WebhookURL, Method="POST",
+            Headers={["Content-Type"]="application/json"}, Body=body})
+    end
 end
 
 -- ─────────────────────────────────────────
@@ -426,28 +456,25 @@ local HAY_DELIVER = {"feed","horse","deliver","give","hay","bucket","barn"}
 local CEM_PICKUP  = {"cement","bag","grab","pick","take","concrete","supply","get"}
 local CEM_DELIVER = {"pour","mixer","deliver","dump","fill","concrete","deposit","cement","add"}
 
--- smartDeliver: iterasi semua target, skip yang visited.
--- return: "ok"=sukses | "allDone"=semua dicoba | "stop"=farm off
+-- [FIX] Ganti `continue` dengan `if not visited[i] then` (support semua executor)
+-- return: "ok" | "allDone" | "notDone" | "stop"
 local function smartDeliver(targets, visited, itemNames, keywords)
     for i, pos in ipairs(targets) do
         if not Cfg.AutoFarm then return "stop" end
-        if visited[i] then continue end
-
-        fastTP(pos)
-        task.wait(0.08)
-        visited[i] = true  -- Tandai sebelum coba, supaya tidak revisit
-
-        if fireNearby(keywords) then
-            task.wait(0.25)
-            if not findItem(itemNames) then
-                addLog("✅ #"..i.." berhasil deliver!")
-                return "ok"
+        if not visited[i] then
+            fastTP(pos)
+            task.wait(0.08)
+            visited[i] = true
+            if fireNearby(keywords) then
+                task.wait(0.25)
+                if not findItem(itemNames) then
+                    addLog("✅ #"..i.." deliver sukses!")
+                    return "ok"
+                end
+                addLog("⚠️ #"..i.." penuh/reject, next...")
             end
-            addLog("⚠️ #"..i.." penuh/reject, lanjut...")
         end
     end
-
-    -- Cek apakah semua sudah dicoba
     for i = 1, #targets do
         if not visited[i] then return "notDone" end
     end
@@ -458,10 +485,10 @@ local function runFarm()
     if Ses.FarmActive then return end
     Ses.FarmActive = true
     Farm.VH, Farm.VM = {}, {}
-    addLog("▶ Farm start: " .. Cfg.Job)
+    addLog("▶ Farm: " .. Cfg.Job)
 
     while Cfg.AutoFarm do
-        if not getRoot() then task.wait(1); continue end
+        if not getRoot() then task.wait(1) else
 
         -- Refuel
         if Cfg.AutoRefuel then
@@ -472,14 +499,16 @@ local function runFarm()
                 if fuel and fuel.Value < 20 then
                     addLog("⛽ Refuel...")
                     if veh.PrimaryPart then
-                        pcall(function() veh:SetPrimaryPartCFrame(CFrame.new(TPos.GasStation+Vector3.new(0,2,0))) end)
-                    else fastTP(TPos.GasStation) end
-                    task.wait(1); fireNearby({"fill","refuel","gas","pump"}, 5)
+                        pcall(function() veh:SetPrimaryPartCFrame(CFrame.new(TPos.GasStation + Vector3.new(0,2,0))) end)
+                    else
+                        fastTP(TPos.GasStation)
+                    end
+                    task.wait(1)
+                    fireNearby({"fill","refuel","gas","pump"}, 5)
                 end
             end
         end
 
-        -- ── HAYBALES ──
         if Cfg.Job == "Haybales" then
             if not findItem(HAY_ITEMS) then
                 fastTP(TPos.HaySupply)
@@ -487,8 +516,8 @@ local function runFarm()
                 fireNearby(HAY_PICKUP)
                 task.wait(0.3)
                 if findItem(HAY_ITEMS) then
-                    Farm.VH = {}  -- Reset visited setiap ambil baru supaya scan semua kuda
-                    addLog("🌾 Hay diambil → scan semua kuda")
+                    Farm.VH = {}
+                    addLog("🌾 Hay diambil")
                 else
                     addLog("⚠️ Gagal ambil hay")
                     task.wait(0.5)
@@ -499,11 +528,14 @@ local function runFarm()
                     Farm.VH = {}
                 elseif res == "allDone" then
                     addLog("🔄 Semua kuda kenyang, tunggu 3s")
-                    Farm.VH = {}; task.wait(3)
-                elseif res == "stop" then break end
+                    Farm.VH = {}
+                    task.wait(3)
+                elseif res == "stop" then
+                    break
+                end
+                -- "notDone" → lanjutkan, visited tetap tersimpan, loop pilih target berikutnya
             end
 
-        -- ── CONSTRUCTION ──
         elseif Cfg.Job == "Construction" then
             if not findItem(CEM_ITEMS) then
                 fastTP(TPos.CemSupply)
@@ -512,7 +544,7 @@ local function runFarm()
                 task.wait(0.3)
                 if findItem(CEM_ITEMS) then
                     Farm.VM = {}
-                    addLog("🧱 Semen diambil → scan semua mixer")
+                    addLog("🧱 Semen diambil")
                 else
                     addLog("⚠️ Gagal ambil semen")
                     task.wait(0.5)
@@ -523,13 +555,17 @@ local function runFarm()
                     Farm.VM = {}
                 elseif res == "allDone" then
                     addLog("🔄 Semua mixer penuh, tunggu 3s")
-                    Farm.VM = {}; task.wait(3)
-                elseif res == "stop" then break end
+                    Farm.VM = {}
+                    task.wait(3)
+                elseif res == "stop" then
+                    break
+                end
             end
         end
 
         SendWebhook("Update")
         task.wait(0.02)
+        end -- getRoot check
     end
 
     Ses.FarmActive = false
@@ -545,12 +581,10 @@ local function onDisconnect(reason)
     discFired = true
     addLog("❌ Disconnect: " .. tostring(reason))
     SendWebhook("Disconnect", reason)
-
     if Cfg.AutoExecURL ~= "" and writefile then
         pcall(writefile, "autoexec/flow_autorun.lua",
             ('loadstring(game:HttpGet("%s"))()'):format(Cfg.AutoExecURL))
     end
-
     if Cfg.AutoReconnect then
         task.wait(4)
         local ok = pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
@@ -561,8 +595,6 @@ local function onDisconnect(reason)
         end
     end
 end
-
--- Triple fallback
 Svc.GuiService:GetPropertyChangedSignal("ErrorMessage"):Connect(function()
     local m = Svc.GuiService:GetErrorMessage()
     if m and m ~= "" then onDisconnect(m) end
@@ -570,13 +602,13 @@ end)
 game:BindToClose(function() onDisconnect("Game closing"); task.wait(2) end)
 LP.AncestryChanged:Connect(function(_, p) if not p then onDisconnect("Removed") end end)
 
-loadStep(0.65, "Loading Fluent UI...")
-
 -- ─────────────────────────────────────────
 --  TOGGLE BUTTON (Draggable)
 -- ─────────────────────────────────────────
 local TogUI = Instance.new("ScreenGui")
-TogUI.Name, TogUI.ResetOnSpawn, TogUI.DisplayOrder = "FlowTogV17", false, 100
+TogUI.Name = "FlowTogV18"
+TogUI.ResetOnSpawn = false
+TogUI.DisplayOrder = 100
 TogUI.Parent = Svc.CoreGui
 
 local Tog = Instance.new("TextButton", TogUI)
@@ -590,29 +622,35 @@ Tog.TextSize = 13
 Tog.AutoButtonColor = false
 Instance.new("UICorner", Tog).CornerRadius = UDim.new(0, 12)
 local togStroke = Instance.new("UIStroke", Tog)
-togStroke.Color, togStroke.Thickness = Color3.fromRGB(138, 92, 226), 1.5
+togStroke.Color = Color3.fromRGB(138, 92, 226)
+togStroke.Thickness = 1.5
 
 Tog.MouseEnter:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(32, 24, 50) end)
 Tog.MouseLeave:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(20, 16, 30) end)
 
--- Drag logic
 local dragging, dragStart, btnStart
 Tog.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-        dragging = true; dragStart = inp.Position; btnStart = Tog.Position
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = inp.Position
+        btnStart = Tog.Position
         inp.Changed:Connect(function()
             if inp.UserInputState == Enum.UserInputState.End then dragging = false end
         end)
     end
 end)
 Svc.UserInputService.InputChanged:Connect(function(inp)
-    if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+    if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+    or inp.UserInputType == Enum.UserInputType.Touch) then
         local d = inp.Position - dragStart
-        Tog.Position = UDim2.new(btnStart.X.Scale, btnStart.X.Offset + d.X, btnStart.Y.Scale, btnStart.Y.Offset + d.Y)
+        Tog.Position = UDim2.new(
+            btnStart.X.Scale, btnStart.X.Offset + d.X,
+            btnStart.Y.Scale, btnStart.Y.Offset + d.Y
+        )
     end
 end)
 
--- Status loop untuk toggle button
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -629,188 +667,214 @@ task.spawn(function()
 end)
 
 -- ─────────────────────────────────────────
---  FLUENT UI
+--  [FIX] FLUENT LOAD — progress bar tetap animasi selama HttpGet
 -- ─────────────────────────────────────────
-local Fluent = loadstring(game:HttpGet(
-    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
-))()
+setLoadTarget(0.55, "Downloading UI library...")
 
-loadStep(0.85, "Building UI...")
+-- Jalankan HttpGet di thread terpisah agar bar tetap smooth
+local Fluent = nil
+local fluentDone = false
+task.spawn(function()
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(
+            "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
+        ))()
+    end)
+    if ok then
+        Fluent = result
+    else
+        -- Fallback URL jika GitHub timeout
+        pcall(function()
+            Fluent = loadstring(game:HttpGet(
+                "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/main.lua"
+            ))()
+        end)
+    end
+    fluentDone = true
+end)
 
+-- Animasi bar ke 0.82 sambil nunggu (smooth, tidak freeze)
+local fakeP = 0.55
+while not fluentDone do
+    fakeP = math.min(fakeP + 0.004, 0.82)
+    setLoadTarget(fakeP, "Downloading UI library...")
+    task.wait(0.05)
+end
+
+if not Fluent then
+    LoadStat.Text = "❌ Gagal load Fluent. Cek koneksi."
+    task.wait(3)
+    LoadGui:Destroy()
+    return
+end
+
+setLoadTarget(0.88, "Building UI...")
+task.wait(0.1)
+
+-- ─────────────────────────────────────────
+--  UI
+-- ─────────────────────────────────────────
 local Win = Fluent:CreateWindow({
-    Title = "Flow Studio", SubTitle = "V1.7 Premium",
-    TabWidth = 150, Size = UDim2.fromOffset(590, 480), Theme = "Darker",
+    Title    = "Flow Studio",
+    SubTitle = "V1.8 Premium",
+    TabWidth = 150,
+    Size     = UDim2.fromOffset(590, 480),
+    Theme    = "Darker",
 })
 
 Tog.MouseButton1Click:Connect(function() pcall(function() Win:Minimize() end) end)
 
 local T = {
-    Auto  = Win:AddTab({ Title = "Automation",  Icon = "tractor"    }),
-    TP    = Win:AddTab({ Title = "Teleport",     Icon = "map-pin"    }),
-    Play  = Win:AddTab({ Title = "Players",      Icon = "users"      }),
-    Set   = Win:AddTab({ Title = "Settings",     Icon = "settings"   }),
-    Perf  = Win:AddTab({ Title = "Performance",  Icon = "zap"        }),
-    Hook  = Win:AddTab({ Title = "Webhook",      Icon = "link"       }),
+    Auto = Win:AddTab({ Title = "Automation",  Icon = "tractor"   }),
+    TP   = Win:AddTab({ Title = "Teleport",    Icon = "map-pin"   }),
+    Play = Win:AddTab({ Title = "Players",     Icon = "users"     }),
+    Set  = Win:AddTab({ Title = "Settings",    Icon = "settings"  }),
+    Perf = Win:AddTab({ Title = "Performance", Icon = "zap"       }),
+    Hook = Win:AddTab({ Title = "Webhook",     Icon = "link"      }),
 }
 
 task.spawn(function()
-    local pStats = LP:WaitForChild("leaderstats", 10)
-    if pStats then
-        local m = pStats:WaitForChild("Money", 5)
+    local ps = LP:WaitForChild("leaderstats", 10)
+    if ps then
+        local m = ps:WaitForChild("Money", 5)
         if m then Ses.StartMoney = m.Value end
     end
 end)
 
--- ─────────────────────────────────────────
---  TAB: AUTOMATION
--- ─────────────────────────────────────────
+-- ── AUTOMATION ──
 T.Auto:AddDropdown("JobSel", {
     Title = "Pilih Job", Values = {"Haybales","Construction"}, Default = "Haybales",
-    Callback = function(v) Cfg.Job = v; Farm.VH = {}; Farm.VM = {}; addLog("Job: "..v) end,
+    Callback = function(v)
+        Cfg.Job = v; Farm.VH = {}; Farm.VM = {}
+        addLog("Job: " .. v)
+    end,
 })
-
 T.Auto:AddToggle("FarmTgl", {
     Title = "Auto Farm", Default = false,
     Callback = function(v)
         Cfg.AutoFarm = v
         if v then task.spawn(runFarm) end
-        addLog(v and "▶ Farm dimulai" or "⏹ Farm stop")
+        addLog(v and "▶ Farm mulai" or "⏹ Farm stop")
     end,
 })
-
 local miniLog = T.Auto:AddParagraph({Title = "Activity Log", Content = "Idle..."})
 
--- ─────────────────────────────────────────
---  TAB: TELEPORT
--- ─────────────────────────────────────────
-T.TP:AddButton({Title = "🌾  Haybales Area",    Callback = function() fastTP(TPos.JobHorse);  addLog("TP: Haybales") end})
-T.TP:AddButton({Title = "🏗️  Construction Area", Callback = function() fastTP(TPos.JobConst);  addLog("TP: Construction") end})
+-- ── TELEPORT ──
+T.TP:AddButton({Title = "🌾  Haybales Area",     Callback = function() fastTP(TPos.JobHorse);   addLog("TP: Haybales") end})
+T.TP:AddButton({Title = "🏗️  Construction Area", Callback = function() fastTP(TPos.JobConst);   addLog("TP: Construction") end})
 T.TP:AddButton({Title = "⛽  Gas Station",        Callback = function() fastTP(TPos.GasStation); addLog("TP: Gas Station") end})
 
-T.TP:AddParagraph({Title = "Player Teleport", Content = "Pilih pemain → Teleport."})
+T.TP:AddParagraph({Title = "Player Teleport", Content = "Pilih pemain lalu tekan Teleport."})
 
 local selPlayer = {name = ""}
-
-local initList = (function()
-    local t = {}
-    for _, p in ipairs(Svc.Players:GetPlayers()) do
-        if p ~= LP then table.insert(t, p.Name) end
-    end
-    return t
-end)()
-
+local initList = {}
+for _, p in ipairs(Svc.Players:GetPlayers()) do
+    if p ~= LP then table.insert(initList, p.Name) end
+end
+-- [FIX] Jika tidak ada pemain, beri placeholder agar Fluent tidak crash
+local dropValues = #initList > 0 and initList or {"(tidak ada pemain)"}
+local dropDefault = #initList > 0 and initList[1] or ""
 if #initList > 0 then selPlayer.name = initList[1] end
 
 T.TP:AddDropdown("PlyrDrop", {
-    Title = "Pilih Pemain", Values = initList, Default = initList[1] or "",
-    Callback = function(v) selPlayer.name = tostring(v) end,
+    Title = "Pilih Pemain", Values = dropValues, Default = dropDefault,
+    Callback = function(v)
+        if v ~= "(tidak ada pemain)" then selPlayer.name = tostring(v) end
+    end,
 })
-
 T.TP:AddButton({
     Title = "🔄 Refresh List",
     Callback = function()
         local n = 0
         for _, p in ipairs(Svc.Players:GetPlayers()) do if p ~= LP then n = n + 1 end end
-        addLog("Refresh: "..n.." pemain. Buka ulang tab jika perlu.")
-        Fluent:Notify({Title="Refresh", Content=n.." pemain ditemukan. Pilih ulang dari dropdown.", Duration=4})
+        addLog("Refresh: " .. n .. " pemain")
+        Fluent:Notify({Title="Refresh", Content=n.." pemain. Pilih ulang dari dropdown.", Duration=4})
     end,
 })
-
 T.TP:AddButton({
     Title = "🚀 Teleport ke Pemain",
     Callback = function()
         local name = selPlayer.name
-        if name == "" then Fluent:Notify({Title="Error", Content="Pilih pemain dulu.", Duration=3}); return end
+        if name == "" then
+            Fluent:Notify({Title="Error", Content="Pilih pemain dulu.", Duration=3}); return
+        end
         local target
         for _, p in ipairs(Svc.Players:GetPlayers()) do
             if p.Name == name then target = p; break end
         end
-        if not target then Fluent:Notify({Title="Error", Content=name.." tidak ada.", Duration=3}); return end
-        local tChar = target.Character
-        local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+        if not target then
+            Fluent:Notify({Title="Error", Content=name.." tidak ada.", Duration=3}); return
+        end
+        local tRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
         if tRoot then
             fastTP(tRoot.Position)
-            addLog("TP → "..name)
+            addLog("TP → " .. name)
             Fluent:Notify({Title="Teleport", Content="TP ke "..name.." berhasil!", Duration=3})
         else
             Fluent:Notify({Title="Error", Content="Karakter "..name.." tidak tersedia.", Duration=3})
         end
     end,
 })
-
 T.TP:AddButton({
     Title = "🌐 Server Hop",
     Callback = function()
-        addLog("Server hopping...")
+        addLog("Server hop...")
         pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
     end,
 })
 
--- ─────────────────────────────────────────
---  TAB: PLAYERS
--- ─────────────────────────────────────────
+-- ── PLAYERS ──
 T.Play:AddToggle("ESPTgl", {
-    Title = "Player ESP (Highlight)", Default = false,
+    Title = "Player ESP", Default = false,
     Callback = function(v) setESP(v); addLog("ESP: "..(v and "ON" or "OFF")) end,
 })
-
 local playerInfo = T.Play:AddParagraph({Title = "Players Online", Content = "..."})
 
--- ─────────────────────────────────────────
---  TAB: SETTINGS
--- ─────────────────────────────────────────
+-- ── SETTINGS ──
 T.Set:AddToggle("WalkTgl", {
     Title = "WalkSpeed Boost", Default = false,
-    Callback = function(v) Cfg.WalkBoost = v; applyBoost(); addLog("WalkBoost: "..(v and "ON ("..Cfg.WalkSpeed..")" or "OFF")) end,
+    Callback = function(v) Cfg.WalkBoost = v; applyBoost() end,
 })
 T.Set:AddSlider("WalkSldr", {
     Title = "Walk Speed", Default = 50, Min = 16, Max = 120, Rounding = 0,
     Callback = function(v) Cfg.WalkSpeed = v; if Cfg.WalkBoost then applyBoost() end end,
 })
-
 T.Set:AddToggle("JumpTgl", {
     Title = "JumpPower Boost", Default = false,
-    Callback = function(v) Cfg.JumpBoost = v; applyBoost(); addLog("JumpBoost: "..(v and "ON" or "OFF")) end,
+    Callback = function(v) Cfg.JumpBoost = v; applyBoost() end,
 })
 T.Set:AddSlider("JumpSldr", {
     Title = "Jump Power", Default = 80, Min = 50, Max = 300, Rounding = 0,
     Callback = function(v) Cfg.JumpPower = v; if Cfg.JumpBoost then applyBoost() end end,
 })
-
 T.Set:AddToggle("NoclipTgl", {
     Title = "Noclip", Default = false,
-    Callback = function(v) setNoclip(v); addLog("Noclip: "..(v and "ON" or "OFF")) end,
+    Callback = function(v) setNoclip(v) end,
 })
-
 T.Set:AddToggle("FlyTgl", {
-    Title = "Fly Mode  (WASD + Space/Shift)", Default = false,
-    Callback = function(v) setFly(v); addLog("Fly: "..(v and "ON" or "OFF")) end,
+    Title = "Fly  (WASD + Space / Shift)", Default = false,
+    Callback = function(v) setFly(v) end,
 })
-T.Set:AddSlider("FlySpSldr", {
+T.Set:AddSlider("FlySldr", {
     Title = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0,
     Callback = function(v) Cfg.FlySpeed = v end,
 })
-
 T.Set:AddToggle("GodTgl", {
-    Title = "God Mode (Infinite HP)", Default = false,
-    Callback = function(v) setGod(v); addLog("GodMode: "..(v and "ON" or "OFF")) end,
+    Title = "God Mode", Default = false,
+    Callback = function(v) setGod(v) end,
 })
-
-T.Set:AddToggle("AntiAfkTgl", {
+T.Set:AddToggle("AntiAFKTgl", {
     Title = "Anti-AFK", Default = true,
-    Callback = function(v) Cfg.AntiAFK = v; addLog("AntiAFK: "..(v and "ON" or "OFF")) end,
+    Callback = function(v) Cfg.AntiAFK = v end,
 })
-
 T.Set:AddToggle("RefuelTgl", {
     Title = "Auto Refuel", Default = false,
     Callback = function(v) Cfg.AutoRefuel = v end,
 })
-
 T.Set:AddToggle("ReconTgl", {
     Title = "Auto Reconnect", Default = true,
     Callback = function(v) Cfg.AutoReconnect = v end,
 })
-
 T.Set:AddToggle("StreamTgl", {
     Title = "Streamer Mode", Default = false,
     Callback = function(v)
@@ -820,7 +884,8 @@ T.Set:AddToggle("StreamTgl", {
         pcall(function()
             local hum = char:FindFirstChild("Humanoid")
             if hum then
-                hum.DisplayDistanceType = v and Enum.HumanoidDisplayDistanceType.None or Enum.HumanoidDisplayDistanceType.Viewer
+                hum.DisplayDistanceType = v and Enum.HumanoidDisplayDistanceType.None
+                    or Enum.HumanoidDisplayDistanceType.Viewer
             end
             for _, obj in ipairs(char:GetDescendants()) do
                 pcall(function()
@@ -832,52 +897,42 @@ T.Set:AddToggle("StreamTgl", {
                 end)
             end
         end)
-        addLog("Streamer: "..(v and "ON" or "OFF"))
     end,
 })
-
 T.Set:AddInput("AutoExecInput", {
-    Title = "Auto-Exec URL (setelah reconnect)",
+    Title = "Auto-Exec URL (post-reconnect)",
     Placeholder = "https://raw.githubusercontent.com/.../script.lua",
     Callback = function(v) Cfg.AutoExecURL = v end,
 })
 
--- ─────────────────────────────────────────
---  TAB: PERFORMANCE
--- ─────────────────────────────────────────
+-- ── PERFORMANCE ──
 T.Perf:AddDropdown("FPSDrop", {
-    Title = "FPS Cap",
-    Values = {"60", "120", "144", "240", "Unlimited"},
-    Default = "60",
+    Title = "FPS Cap", Values = {"60","120","144","240","Unlimited"}, Default = "60",
     Callback = function(v)
         setFPS(v)
-        addLog("FPS: "..v)
-        Fluent:Notify({Title="FPS", Content="FPS cap diset ke "..v, Duration=3})
+        addLog("FPS: " .. v)
+        Fluent:Notify({Title="FPS", Content="FPS cap: "..v, Duration=3})
     end,
 })
-
 T.Perf:AddToggle("PerfTgl", {
-    Title = "Performance Mode (matikan shadows & efek)", Default = false,
-    Callback = function(v) setPerfMode(v); addLog("PerfMode: "..(v and "ON" or "OFF")) end,
+    Title = "Performance Mode (no shadows/effects)", Default = false,
+    Callback = function(v) setPerfMode(v) end,
 })
-
 T.Perf:AddButton({
-    Title = "🔄 Rejoin Server",
+    Title = "🔄 Rejoin",
     Callback = function()
         addLog("Rejoining...")
         pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
     end,
 })
 
--- ─────────────────────────────────────────
---  TAB: WEBHOOK
--- ─────────────────────────────────────────
+-- ── WEBHOOK ──
 T.Hook:AddInput("WebURL", {
     Title = "Webhook URL", Placeholder = "https://discord.com/api/webhooks/...",
     Callback = function(v) Cfg.WebhookURL = v end,
 })
 T.Hook:AddInput("DiscID", {
-    Title = "Discord ID (tag saat disconnect)", Placeholder = "123456789012345678",
+    Title = "Discord ID", Placeholder = "123456789012345678",
     Callback = function(v) Cfg.DiscordID = v end,
 })
 T.Hook:AddButton({
@@ -892,22 +947,20 @@ T.Hook:AddButton({
     end,
 })
 
-loadStep(0.95, "Starting monitors...")
+setLoadTarget(0.95, "Starting monitors...")
 
 -- ─────────────────────────────────────────
 --  MONITOR LOOP
 -- ─────────────────────────────────────────
 task.spawn(function()
-    task.wait(2)  -- Beri Fluent waktu fully render
-
+    task.wait(2)
     local function safeSet(obj, data)
         pcall(function() obj:SetValues(data) end)
     end
-
     while true do
         pcall(function()
-            local pStats = LP:FindFirstChild("leaderstats")
-            local cur = pStats and pStats:FindFirstChild("Money") and pStats.Money.Value or 0
+            local ps = LP:FindFirstChild("leaderstats")
+            local cur = ps and ps:FindFirstChild("Money") and ps.Money.Value or 0
             if Ses.StartMoney == 0 and cur > 0 then Ses.StartMoney = cur end
             Ses.CurrentProfit = cur - Ses.StartMoney
             local elapsed = math.max(1, math.floor((os.time() - Ses.StartTime) / 60))
@@ -923,43 +976,40 @@ task.spawn(function()
                 )
             })
 
-            -- Update player list di tab Players
             local plist = {}
             for _, p in ipairs(Svc.Players:GetPlayers()) do
                 table.insert(plist, (p == LP and "★ " or "  ") .. p.Name)
             end
             safeSet(playerInfo, {
-                Title = "Players Online ("..#Svc.Players:GetPlayers()..")",
+                Title = "Players ("..#Svc.Players:GetPlayers()..")",
                 Content = table.concat(plist, "\n")
             })
         end)
-
         task.wait(1)
     end
 end)
 
 -- ─────────────────────────────────────────
---  DONE
+--  DONE — Tutup loading screen
 -- ─────────────────────────────────────────
 Win:SelectTab(1)
 
-loadStep(1.0, "Ready!")
-task.wait(0.4)
+setLoadTarget(1.0, "Ready!")
+task.wait(0.5)
 
-Svc.TweenService:Create(LBG, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
-    BackgroundTransparency = 1
-}):Play()
+-- Fade out loading screen
 for _, obj in ipairs(LBG:GetDescendants()) do
     pcall(function()
-        if obj:IsA("TextLabel") or obj:IsA("Frame") then
-            Svc.TweenService:Create(obj, TweenInfo.new(0.4), {
-                BackgroundTransparency = 1, TextTransparency = 1
-            }):Play()
+        if obj:IsA("TextLabel") then
+            Svc.TweenService:Create(obj, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+        elseif obj:IsA("Frame") then
+            Svc.TweenService:Create(obj, TweenInfo.new(0.35), {BackgroundTransparency = 1}):Play()
         end
     end)
 end
-task.wait(0.5)
+Svc.TweenService:Create(LBG, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+task.wait(0.45)
 LoadGui:Destroy()
 
-addLog("✅ V1.7 siap!")
-Fluent:Notify({Title="Flow Studio V1.7", Content="All systems ready.", Duration=5})
+addLog("✅ V1.8 siap!")
+Fluent:Notify({Title = "Flow Studio V1.8", Content = "All systems ready.", Duration = 4})
