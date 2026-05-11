@@ -1,0 +1,185 @@
+# ⚡ Flow Studio V1.7 Premium
+> Developer: **Theo** · Hub: Flow Hub · Updated: V1.7
+
+---
+
+## 📋 Fitur Lengkap
+
+### 🌾 Farm Engine
+| Fitur | Detail |
+|-------|--------|
+| Smart Delivery | Tidak revisit target yang sudah dicoba dalam satu round |
+| Instant TP | Wait hanya 0.05s setelah teleport (bukan 0.3–0.5s) |
+| Delivery Confirm | Konfirmasi via item-check, bukan hanya "prompt fired" |
+| Visited Reset | Reset setiap ambil item baru → scan semua target fresh |
+| Auto Refuel | Otomatis isi bensin saat fuel < 20 |
+| Job: Haybales | 4 koordinat kuda, semua di-scan setiap round |
+| Job: Construction | 8 koordinat mixer, semua di-scan setiap round |
+
+### 👤 Player
+| Fitur | Detail |
+|-------|--------|
+| WalkSpeed Boost | Slider 16–120, auto re-apply setelah respawn |
+| JumpPower Boost | Slider 50–300, auto re-apply setelah respawn |
+| Noclip | No collision, toggle on/off |
+| Fly Mode | WASD + Space/Shift, speed slider 10–200 |
+| God Mode | Health selalu full via Heartbeat |
+| ESP | Highlight ungu + outline putih, AlwaysOnTop |
+
+### ⚙️ System
+| Fitur | Detail |
+|-------|--------|
+| Anti-AFK | VirtualUser Heartbeat |
+| Auto Reconnect | 3 metode: ErrorMessage + BindToClose + AncestryChanged |
+| Auto-Execute | Tulis script ke `autoexec/flow_autorun.lua` setelah reconnect |
+| Streamer Mode | Sembunyikan karakter + nama |
+| Server Hop | Teleport ke server baru |
+| Player Teleport | TP ke pemain manapun di server |
+
+### 🎮 Performance
+| Fitur | Detail |
+|-------|--------|
+| FPS Unlocker | 60 / 120 / 144 / 240 / Unlimited via `setfpscap` |
+| Performance Mode | Matikan GlobalShadows + semua PostEffect |
+
+### 🔗 Integration
+| Fitur | Detail |
+|-------|--------|
+| Discord Webhook | Update profit setiap 80 detik |
+| Disconnect Alert | Ping Discord ID atau @everyone saat kick/disconnect |
+| Test Button | Test webhook langsung dari UI |
+
+---
+
+## 🚀 Instalasi
+
+```lua
+-- Paste ke executor lalu Execute
+loadstring(game:HttpGet("URL_SCRIPT_KAMU"))()
+```
+
+Atau copy-paste langsung isi `FlowStudio_V1.7.lua`.
+
+---
+
+## 🗺️ Koordinat
+
+Koordinat ada di bagian `TPos` dan `Targets` di atas script.
+
+```lua
+local TPos = {
+    JobHorse     = Vector3.new(13377.90, 149.05,  2997.01), -- Area haybales
+    JobConst     = Vector3.new(29274.67, 195.81, -2377.38), -- Area construction
+    HaySupply    = Vector3.new(13380.60, 149.04,  2985.09), -- Tumpukan hay
+    CemSupply    = Vector3.new(29264.86, 195.81, -2377.06), -- Tumpukan semen
+    GasStation   = Vector3.new(-643.71,    8.09,    10.98), -- SPBU
+}
+```
+
+**Cara update koordinat:**
+1. Di game, berdiri di lokasi yang ingin diubah
+2. Buka output/console di executor
+3. Print: `print(game.Players.LocalPlayer.Character.HumanoidRootPart.Position)`
+4. Ganti nilai di script
+
+**Cara tambah kuda/mixer baru:**
+```lua
+-- Tambahkan Vector3 baru di Targets.Horses atau Targets.Mixers
+Targets.Horses = {
+    Vector3.new(...), -- Existing
+    Vector3.new(...), -- Tambahkan di sini
+}
+```
+
+---
+
+## 🔧 Konfigurasi Keywords
+
+Jika prompt di game tidak terdeteksi, ubah keywords sesuai text prompt game:
+
+```lua
+local HAY_PICKUP  = {"wheat","hay","grab","pick","take","straw","bale","supply"}
+local HAY_DELIVER = {"feed","horse","deliver","give","hay","bucket","barn"}
+local CEM_PICKUP  = {"cement","bag","grab","pick","take","concrete","supply","get"}
+local CEM_DELIVER = {"pour","mixer","deliver","dump","fill","concrete","deposit","cement","add"}
+```
+
+**Cara cari keyword yang benar:**
+Lihat text di atas prompt saat berdiri dekat objek. Tambahkan kata tersebut (lowercase) ke list yang sesuai.
+
+---
+
+## 🔗 Discord Webhook Setup
+
+1. Buka channel Discord yang diinginkan
+2. Edit Channel → Integrations → Webhooks → New Webhook
+3. Copy URL → paste ke kolom **Webhook URL** di tab Webhook
+4. Untuk ping saat disconnect: isi **Discord ID** (klik kanan nama → Copy ID, developer mode harus aktif)
+
+---
+
+## ⚡ Auto-Execute Setelah Reconnect
+
+1. Isi **Auto-Exec URL** di tab Settings dengan raw URL script kamu
+2. Pastikan executor support `writefile` (Synapse X, KRNL, dll.)
+3. Script akan ditulis ke `autoexec/flow_autorun.lua` otomatis sebelum reconnect
+4. Setelah rejoin, executor akan auto-run script
+
+---
+
+## ❓ Troubleshooting
+
+| Masalah | Solusi |
+|---------|--------|
+| Prompt tidak ke-fire | Cek keywords — lihat text prompt di game, tambahkan ke list yang sesuai |
+| Farm balik ke supply padahal ada item | Nama item di game tidak match dengan `HAY_ITEMS`/`CEM_ITEMS`, tambahkan nama yang benar |
+| Auto Reconnect tidak jalan | Coba matikan + nyalakan ulang, pastikan toggle aktif |
+| FPS tidak berubah | Executor kamu mungkin tidak support `setfpscap`, gunakan Synapse X atau KRNL |
+| ESP tidak muncul | `Highlight` instance mungkin tidak support di versi executor lama |
+| Loading stuck | HttpGet ke Fluent timeout — coba lagi atau periksa koneksi |
+
+---
+
+## 📝 Changelog
+
+### V1.7 (Latest)
+- `[NEW]` Loading screen animasi dengan progress bar
+- `[NEW]` Toggle button draggable + status indicator (Idle/Farming)
+- `[NEW]` Tab Settings (WalkSpeed, JumpPower, Noclip, Fly, God, Streamer, AntiAFK, AutoExec URL)
+- `[NEW]` Tab Performance (FPS 60/120/144/240/Unlimited, Performance Mode)
+- `[NEW]` Tab Players (ESP, player list realtime)
+- `[NEW]` Fly Mode (WASD + Space/Shift, speed adjustable)
+- `[NEW]` God Mode (infinite HP)
+- `[NEW]` Player ESP (Highlight, AlwaysOnTop)
+- `[FIX]` Farm: visited reset setiap pickup baru → scan semua target fresh
+- `[FIX]` Farm: delivery dikonfirmasi via item-check, bukan hanya prompt-fired
+- `[FIX]` Farm: TP wait dikurangi dari 0.3s → 0.05s (instant feel)
+- `[FIX]` Prompt scanner: scan 5 level ancestor per part (lebih thorough)
+- `[FIX]` Auto Reconnect: triple fallback (GuiService + BindToClose + AncestryChanged)
+- `[FIX]` Player TP: menggunakan table reference bukan string closure
+- `[FIX]` Activity Log: pcall + 2s init delay, tidak crash saat Fluent belum ready
+- `[FIX]` Toggle button: draggable, hover effect, status color
+
+### V1.6
+- Smart visited tracking
+- Delivery confirmation
+- FarmCycleActive guard
+- WalkSpeed, JumpPower, Noclip
+
+### V1.5
+- Anti-AFK via VirtualUser
+- Webhook JSONEncode fix
+- Streamer Mode pcall fix
+
+### V1.4 (Original)
+- Auto Farm (Haybales + Construction)
+- Webhook
+- Teleport
+- Auto Reconnect
+
+---
+
+## ⚠️ Notice
+
+Script ini hanya untuk keperluan **testing dan edukasi pribadi**.
+Penggunaan di server publik bisa berakibat pada ban akun.
