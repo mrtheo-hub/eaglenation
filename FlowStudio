@@ -535,10 +535,6 @@ local function onDisconnect(reason)
         end
     end
 end
-Svc.GuiService:GetPropertyChangedSignal("ErrorMessage"):Connect(function()
-    local m = Svc.GuiService:GetErrorMessage()
-    if m and m ~= "" then onDisconnect(m) end
-end)
 game:BindToClose(function() onDisconnect("Game closing"); task.wait(2) end)
 LP.AncestryChanged:Connect(function(_, p) if not p then onDisconnect("Removed") end end)
 
