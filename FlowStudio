@@ -1,4 +1,4 @@
--- FLOW STUDIO V2.1 | Developer: Theo | Hub: Flow Hub
+-- FLOW STUDIO V2.0 | Developer: Theo | Hub: Flow Hub
 
 local Svc = {
     Players          = game:GetService("Players"),
@@ -17,15 +17,17 @@ local Svc = {
 local LP = Svc.Players.LocalPlayer
 local TW = Svc.TweenService
 
+-- Color palette — blackest possible, grey lines only
 local C = {
-    BG     = Color3.fromRGB(4,   4,   6),
-    CARD   = Color3.fromRGB(8,   8,  11),
-    LINE   = Color3.fromRGB(32,  32,  36),
-    ACCENT = Color3.fromRGB(138, 92,  226),
-    TEXT   = Color3.fromRGB(210, 210, 220),
-    MUTED  = Color3.fromRGB(75,  75,  85),
-    GREEN  = Color3.fromRGB(80,  220, 130),
-    YELLOW = Color3.fromRGB(240, 190, 60),
+    BG       = Color3.fromRGB(4,   4,   6),    -- true black background
+    CARD     = Color3.fromRGB(8,   8,  11),    -- card surfaces
+    LINE     = Color3.fromRGB(32,  32,  36),   -- grey separator lines
+    ACCENT   = Color3.fromRGB(138, 92,  226),  -- purple accent
+    ACCENTHI = Color3.fromRGB(165, 120, 255),  -- lighter accent for hover
+    TEXT     = Color3.fromRGB(210, 210, 220),  -- primary text
+    MUTED    = Color3.fromRGB(75,  75,  85),   -- muted text
+    GREEN    = Color3.fromRGB(80,  220, 130),
+    RED      = Color3.fromRGB(255, 80,  80),
 }
 
 local reqFunc
@@ -39,47 +41,28 @@ do
 end
 
 local Cfg = {
-    AutoFarm     = false,
-    Job          = "Haybales",
-    FarmDelay    = 0.08,
-    AutoStop     = false,
-    AutoStopMins = 60,
-    Keybind      = Enum.KeyCode.RightShift,
-    AutoReconnect = true,
-    AutoRefuel   = false,
-    AntiAFK      = true,
-    WalkBoost    = false,
-    WalkSpeed    = 50,
-    JumpBoost    = false,
-    JumpPower    = 80,
-    Noclip       = false,
-    Fly          = false,
-    FlySpeed     = 50,
-    GodMode      = false,
-    ESP          = false,
-    PerfMode     = false,
-    FPSCap       = "60",
+    AutoFarm = false, Job = "Haybales",
+    AutoReconnect = true, AutoRefuel = false, AntiAFK = true,
+    WalkBoost = false, WalkSpeed = 50,
+    JumpBoost = false, JumpPower = 80,
+    Noclip = false, Fly = false, FlySpeed = 50,
+    GodMode = false, ESP = false,
+    PerfMode = false, FPSCap = "60",
     StreamerMode = false,
-    AutoExecURL  = "",
-    WebhookURL   = "",
-    DiscordID    = "",
+    AutoExecURL = "", WebhookURL = "", DiscordID = "",
 }
 
 local Ses = {
-    StartMoney   = 0,
-    CurrentProfit = 0,
-    StartTime    = os.time(),
-    Logs         = {},
-    LastWebhook  = 0,
-    FarmActive   = false,
-    Deliveries   = 0,
-    FarmStart    = 0,
+    StartMoney = 0, CurrentProfit = 0,
+    StartTime = os.time(), Logs = {},
+    LastWebhook = 0, FarmActive = false,
 }
 
 local Farm = { VH = {}, VM = {} }
 
-local CONFIG_PATH = "FlowStudio_config.json"
-
+-- ─────────────────────────────────────────
+--  COORDINATES
+-- ─────────────────────────────────────────
 local TPos = {
     JobHorse   = Vector3.new(13377.90, 149.05,  2997.01),
     JobConst   = Vector3.new(29274.67, 195.81, -2377.38),
@@ -87,7 +70,6 @@ local TPos = {
     CemSupply  = Vector3.new(29264.86, 195.81, -2377.06),
     GasStation = Vector3.new(-643.71,    8.09,    10.98),
 }
-
 local Targets = {
     Horses = {
         Vector3.new(13313.27, 149.11, 2958.99),
@@ -107,6 +89,9 @@ local Targets = {
     },
 }
 
+-- ─────────────────────────────────────────
+--  UTILITIES
+-- ─────────────────────────────────────────
 local function addLog(msg)
     table.insert(Ses.Logs, 1, ("[%s] %s"):format(os.date("%X"), msg))
     if #Ses.Logs > 14 then table.remove(Ses.Logs) end
@@ -186,43 +171,9 @@ local function fireNearby(keywords, holdTime)
     return false
 end
 
-local function saveConfig()
-    if not writefile then return end
-    local data = {
-        Job          = Cfg.Job,
-        FarmDelay    = Cfg.FarmDelay,
-        AutoStop     = Cfg.AutoStop,
-        AutoStopMins = Cfg.AutoStopMins,
-        AutoReconnect = Cfg.AutoReconnect,
-        AutoRefuel   = Cfg.AutoRefuel,
-        AntiAFK      = Cfg.AntiAFK,
-        WalkBoost    = Cfg.WalkBoost,
-        WalkSpeed    = Cfg.WalkSpeed,
-        JumpBoost    = Cfg.JumpBoost,
-        JumpPower    = Cfg.JumpPower,
-        FlySpeed     = Cfg.FlySpeed,
-        PerfMode     = Cfg.PerfMode,
-        FPSCap       = Cfg.FPSCap,
-        WebhookURL   = Cfg.WebhookURL,
-        DiscordID    = Cfg.DiscordID,
-        AutoExecURL  = Cfg.AutoExecURL,
-    }
-    local ok, body = pcall(Svc.HttpService.JSONEncode, Svc.HttpService, data)
-    if ok then pcall(writefile, CONFIG_PATH, body) end
-end
-
-local function loadConfig()
-    if not readfile then return end
-    local ok, raw = pcall(readfile, CONFIG_PATH)
-    if not ok or not raw or raw == "" then return end
-    local ok2, data = pcall(Svc.HttpService.JSONDecode, Svc.HttpService, raw)
-    if not ok2 or type(data) ~= "table" then return end
-    for k, v in pairs(data) do
-        if Cfg[k] ~= nil then Cfg[k] = v end
-    end
-    addLog("Config dimuat dari file")
-end
-
+-- ─────────────────────────────────────────
+--  ANTI-AFK
+-- ─────────────────────────────────────────
 Svc.RunService.Heartbeat:Connect(function()
     if Cfg.AntiAFK then
         pcall(function()
@@ -232,6 +183,9 @@ Svc.RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- ─────────────────────────────────────────
+--  BOOST
+-- ─────────────────────────────────────────
 local function applyBoost(hum)
     hum = hum or getHum()
     if not hum then return end
@@ -241,6 +195,9 @@ local function applyBoost(hum)
     end)
 end
 
+-- ─────────────────────────────────────────
+--  NOCLIP
+-- ─────────────────────────────────────────
 local noclipConn
 local function setNoclip(on)
     Cfg.Noclip = on
@@ -260,6 +217,9 @@ local function setNoclip(on)
     end
 end
 
+-- ─────────────────────────────────────────
+--  FLY
+-- ─────────────────────────────────────────
 local flyConn, flyBV, flyBGyro
 local function setFly(on)
     Cfg.Fly = on
@@ -292,6 +252,9 @@ local function setFly(on)
     end
 end
 
+-- ─────────────────────────────────────────
+--  GOD MODE
+-- ─────────────────────────────────────────
 local godConn
 local function setGod(on)
     Cfg.GodMode = on
@@ -314,6 +277,9 @@ LP.CharacterAdded:Connect(function(char)
     if Cfg.GodMode then setGod(true) end
 end)
 
+-- ─────────────────────────────────────────
+--  ESP
+-- ─────────────────────────────────────────
 local espConns = {}
 local function clearESP()
     for _, c in ipairs(espConns) do pcall(function() c:Disconnect() end) end
@@ -345,6 +311,9 @@ local function setESP(on)
     end)
 end
 
+-- ─────────────────────────────────────────
+--  FPS / PERF
+-- ─────────────────────────────────────────
 local function setFPS(cap)
     Cfg.FPSCap = cap
     local val = cap == "Unlimited" and math.huge or (tonumber(cap) or 60)
@@ -364,6 +333,9 @@ local function setPerfMode(on)
     end)
 end
 
+-- ─────────────────────────────────────────
+--  WEBHOOK
+-- ─────────────────────────────────────────
 local function SendWebhook(typ, extra)
     if Cfg.WebhookURL == "" or not reqFunc then return end
     local isDisc = typ == "Disconnect"
@@ -378,21 +350,19 @@ local function SendWebhook(typ, extra)
         title = "🚨 DISCONNECT", color = 0xFF4747,
         description = "Terputus." .. (Cfg.AutoReconnect and " 🔄 Reconnecting..." or ""),
         fields = {
-            {name="User",       value="`"..LP.Name.."`",         inline=true},
-            {name="Reason",     value="`"..tostring(extra).."`", inline=false},
-            {name="Profit",     value="$"..Ses.CurrentProfit,    inline=true},
-            {name="Deliveries", value=tostring(Ses.Deliveries),  inline=true},
-            {name="Time",       value=elapsed.."m",              inline=true},
+            {name="User",   value="`"..LP.Name.."`",         inline=true},
+            {name="Reason", value="`"..tostring(extra).."`", inline=false},
+            {name="Profit", value="$"..Ses.CurrentProfit,    inline=true},
+            {name="Time",   value=elapsed.."m",              inline=true},
         },
     } or {
         title = "📊 FLOW UPDATE", color = 0x8A5CE2,
         fields = {
-            {name="User",       value="`"..LP.Name.."`",      inline=true},
-            {name="Profit",     value="$"..Ses.CurrentProfit, inline=true},
-            {name="/Jam",       value="~$"..pph,              inline=true},
-            {name="Deliveries", value=tostring(Ses.Deliveries), inline=true},
-            {name="Job",        value=Cfg.Job,                inline=true},
-            {name="Time",       value=elapsed.."m",           inline=true},
+            {name="User",   value="`"..LP.Name.."`",      inline=true},
+            {name="Profit", value="$"..Ses.CurrentProfit, inline=true},
+            {name="/Jam",   value="~$"..pph,              inline=true},
+            {name="Job",    value=Cfg.Job,                inline=true},
+            {name="Time",   value=elapsed.."m",           inline=true},
         },
     }
     local ok, body = pcall(Svc.HttpService.JSONEncode, Svc.HttpService, {content=tag, embeds={embed}})
@@ -402,6 +372,9 @@ local function SendWebhook(typ, extra)
     end
 end
 
+-- ─────────────────────────────────────────
+--  FARM ENGINE
+-- ─────────────────────────────────────────
 local HAY_ITEMS   = {"Wheat","Hay","HayBale","Straw"}
 local CEM_ITEMS   = {"Cement","CementBag","Concrete","Bag"}
 local HAY_PICKUP  = {"wheat","hay","grab","pick","take","straw","bale","supply"}
@@ -414,13 +387,12 @@ local function smartDeliver(targets, visited, itemNames, keywords)
         if not Cfg.AutoFarm then return "stop" end
         if not visited[i] then
             fastTP(pos)
-            task.wait(Cfg.FarmDelay)
+            task.wait(0.08)
             visited[i] = true
             if fireNearby(keywords) then
                 task.wait(0.25)
                 if not findItem(itemNames) then
-                    Ses.Deliveries = Ses.Deliveries + 1
-                    addLog("✅ #"..i.." deliver! Total: "..Ses.Deliveries)
+                    addLog("✅ #"..i.." deliver sukses!")
                     return "ok"
                 end
                 addLog("⚠️ #"..i.." penuh, next...")
@@ -436,20 +408,10 @@ end
 local function runFarm()
     if Ses.FarmActive then return end
     Ses.FarmActive = true
-    Ses.FarmStart  = os.time()
     Farm.VH, Farm.VM = {}, {}
     addLog("▶ Farm: " .. Cfg.Job)
 
     while Cfg.AutoFarm do
-        if Cfg.AutoStop and Ses.FarmStart > 0 then
-            local mins = (os.time() - Ses.FarmStart) / 60
-            if mins >= Cfg.AutoStopMins then
-                Cfg.AutoFarm = false
-                addLog("⏱ Auto-stop setelah "..Cfg.AutoStopMins.."m")
-                break
-            end
-        end
-
         if not getRoot() then
             task.wait(1)
         else
@@ -471,7 +433,7 @@ local function runFarm()
 
             if Cfg.Job == "Haybales" then
                 if not findItem(HAY_ITEMS) then
-                    fastTP(TPos.HaySupply); task.wait(Cfg.FarmDelay)
+                    fastTP(TPos.HaySupply); task.wait(0.08)
                     fireNearby(HAY_PICKUP); task.wait(0.3)
                     if findItem(HAY_ITEMS) then
                         Farm.VH = {}; addLog("🌾 Hay diambil")
@@ -480,14 +442,14 @@ local function runFarm()
                     end
                 else
                     local res = smartDeliver(Targets.Horses, Farm.VH, HAY_ITEMS, HAY_DELIVER)
-                    if res == "ok"          then Farm.VH = {}
+                    if res == "ok"      then Farm.VH = {}
                     elseif res == "allDone" then addLog("🔄 Semua kuda kenyang, 3s"); Farm.VH = {}; task.wait(3)
                     elseif res == "stop"    then break end
                 end
 
             elseif Cfg.Job == "Construction" then
                 if not findItem(CEM_ITEMS) then
-                    fastTP(TPos.CemSupply); task.wait(Cfg.FarmDelay)
+                    fastTP(TPos.CemSupply); task.wait(0.08)
                     fireNearby(CEM_PICKUP); task.wait(0.3)
                     if findItem(CEM_ITEMS) then
                         Farm.VM = {}; addLog("🧱 Semen diambil")
@@ -496,7 +458,7 @@ local function runFarm()
                     end
                 else
                     local res = smartDeliver(Targets.Mixers, Farm.VM, CEM_ITEMS, CEM_DELIVER)
-                    if res == "ok"          then Farm.VM = {}
+                    if res == "ok"      then Farm.VM = {}
                     elseif res == "allDone" then addLog("🔄 Semua mixer penuh, 3s"); Farm.VM = {}; task.wait(3)
                     elseif res == "stop"    then break end
                 end
@@ -508,9 +470,12 @@ local function runFarm()
     end
 
     Ses.FarmActive = false
-    addLog("⏹ Farm berhenti — "..Ses.Deliveries.." deliver total")
+    addLog("⏹ Farm berhenti")
 end
 
+-- ─────────────────────────────────────────
+--  AUTO RECONNECT
+-- ─────────────────────────────────────────
 local discFired = false
 local function onDisconnect(reason)
     if discFired then return end
@@ -522,10 +487,7 @@ local function onDisconnect(reason)
             ('loadstring(game:HttpGet("%s"))()'):format(Cfg.AutoExecURL))
     end
     if Cfg.AutoReconnect then
-        for i = 5, 1, -1 do
-            addLog("🔄 Reconnect dalam "..i.."s...")
-            task.wait(1)
-        end
+        task.wait(4)
         local ok = pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
         if not ok then
             pcall(function()
@@ -541,18 +503,11 @@ end)
 game:BindToClose(function() onDisconnect("Game closing"); task.wait(2) end)
 LP.AncestryChanged:Connect(function(_, p) if not p then onDisconnect("Removed") end end)
 
--- Keybind toggle
-Svc.UserInputService.InputBegan:Connect(function(inp, gpe)
-    if gpe then return end
-    if inp.KeyCode == Cfg.Keybind then
-        Cfg.AutoFarm = not Cfg.AutoFarm
-        if Cfg.AutoFarm then task.spawn(runFarm) end
-        addLog((Cfg.AutoFarm and "▶ Farm (keybind)" or "⏹ Stop (keybind)"))
-    end
-end)
-
+-- ─────────────────────────────────────────
+--  TOGGLE BUTTON
+-- ─────────────────────────────────────────
 local TogUI = Instance.new("ScreenGui")
-TogUI.Name, TogUI.ResetOnSpawn, TogUI.DisplayOrder = "FlowTog21", false, 100
+TogUI.Name, TogUI.ResetOnSpawn, TogUI.DisplayOrder = "FlowTog20", false, 100
 TogUI.Parent = Svc.CoreGui
 
 local Tog = Instance.new("TextButton", TogUI)
@@ -569,13 +524,16 @@ Instance.new("UICorner", Tog).CornerRadius = UDim.new(0, 10)
 local togLine = Instance.new("UIStroke", Tog)
 togLine.Color, togLine.Thickness = C.LINE, 1
 
+-- Accent highlight bar at top of button
 local togAccent = Instance.new("Frame", Tog)
-togAccent.Size, togAccent.Position = UDim2.new(0.6, 0, 0, 1), UDim2.new(0.2, 0, 0, 0)
-togAccent.BackgroundColor3, togAccent.BorderSizePixel = C.ACCENT, 0
+togAccent.Size             = UDim2.new(0.6, 0, 0, 1)
+togAccent.Position         = UDim2.new(0.2, 0, 0, 0)
+togAccent.BackgroundColor3 = C.ACCENT
+togAccent.BorderSizePixel  = 0
 
 Tog.MouseEnter:Connect(function()
-    TW:Create(Tog,     TweenInfo.new(0.15), {BackgroundColor3 = C.CARD}):Play()
-    TW:Create(togLine, TweenInfo.new(0.15), {Color = C.ACCENT}):Play()
+    TW:Create(Tog,      TweenInfo.new(0.15), {BackgroundColor3 = C.CARD}):Play()
+    TW:Create(togLine,  TweenInfo.new(0.15), {Color = C.ACCENT}):Play()
 end)
 Tog.MouseLeave:Connect(function()
     if not Cfg.AutoFarm then
@@ -608,7 +566,7 @@ task.spawn(function()
     while true do
         task.wait(0.5)
         if Cfg.AutoFarm then
-            TW:Create(Tog,       TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(5,13,7)}):Play()
+            TW:Create(Tog,       TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(6,14,8)}):Play()
             TW:Create(togLine,   TweenInfo.new(0.2), {Color = C.GREEN}):Play()
             TW:Create(togAccent, TweenInfo.new(0.2), {BackgroundColor3 = C.GREEN}):Play()
             Tog.TextColor3 = C.GREEN
@@ -623,50 +581,69 @@ task.spawn(function()
     end
 end)
 
+-- ─────────────────────────────────────────
+--  FLUENT
+-- ─────────────────────────────────────────
 local Fluent = loadstring(game:HttpGet(
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 ))()
 
 local Win = Fluent:CreateWindow({
     Title    = "Flow Studio",
-    SubTitle = "V2.1 Premium",
+    SubTitle = "V2.0 Premium",
     TabWidth = 150,
     Size     = UDim2.fromOffset(590, 490),
     Theme    = "Darker",
 })
 
+-- ─────────────────────────────────────────
+--  UI COLOR OVERRIDE — apply blackest theme
+--  Runs after Fluent init, iterates all descendants
+--  and replaces near-black backgrounds with true black,
+--  and non-accent strokes with grey lines.
+-- ─────────────────────────────────────────
 task.spawn(function()
     task.wait(0.05)
-    local fg
-    -- Find Fluent's ScreenGui by exclusion and type
+    local fluent_gui
     for _, g in ipairs(Svc.CoreGui:GetChildren()) do
-        if g:IsA("ScreenGui") and g.Name ~= TogUI.Name and g.Name ~= "RobloxGui" then
-            fg = g; break
+        if g:IsA("ScreenGui") and g ~= TogUI then
+            fluent_gui = g; break
         end
     end
-    if not fg then return end
-    for _, obj in ipairs(fg:GetDescendants()) do
+    if not fluent_gui then return end
+
+    for _, obj in ipairs(fluent_gui:GetDescendants()) do
         pcall(function()
             if obj:IsA("Frame") or obj:IsA("ScrollingFrame") then
+                local r = obj.BackgroundColor3.R * 255
+                local g = obj.BackgroundColor3.G * 255
+                local b = obj.BackgroundColor3.B * 255
+                -- Replace any dark background (not white/light) with true black palette
                 if obj.BackgroundTransparency < 0.9 then
-                    local r = obj.BackgroundColor3.R * 255
-                    local g = obj.BackgroundColor3.G * 255
-                    local b = obj.BackgroundColor3.B * 255
                     if r < 55 and g < 55 and b < 65 then
-                        obj.BackgroundColor3 = (r < 20 and g < 20 and b < 25) and C.BG or C.CARD
+                        -- Very dark → true black
+                        if r < 20 and g < 20 and b < 25 then
+                            obj.BackgroundColor3 = C.BG
+                        else
+                            -- Slightly lighter dark → card black
+                            obj.BackgroundColor3 = C.CARD
+                        end
                     end
                 end
             elseif obj:IsA("UIStroke") then
                 local r = obj.Color.R * 255
                 local g = obj.Color.G * 255
                 local b = obj.Color.B * 255
-                if not ((b > r + 20) and (b > g + 20) and (b > 80)) then
+                -- Keep accent-purple strokes, grey-ify everything else
+                local isPurple = (b > r + 20) and (b > g + 20) and (b > 80)
+                if not isPurple then
                     obj.Color = C.LINE
                 end
             elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
                 local r = obj.TextColor3.R * 255
                 local g = obj.TextColor3.G * 255
                 local b = obj.TextColor3.B * 255
+                -- Brighten very dim text to readable level
                 if r > 140 and g > 140 and b > 140 and r < 200 then
                     obj.TextColor3 = C.TEXT
                 end
@@ -675,6 +652,9 @@ task.spawn(function()
     end
 end)
 
+-- ─────────────────────────────────────────
+--  TABS
+-- ─────────────────────────────────────────
 Tog.MouseButton1Click:Connect(function() pcall(function() Win:Minimize() end) end)
 
 local T = {
@@ -694,34 +674,22 @@ task.spawn(function()
     end
 end)
 
-loadConfig()
-
+-- ── AUTOMATION ──
 T.Auto:AddDropdown("JobSel", {
-    Title = "Pilih Job", Values = {"Haybales","Construction"}, Default = Cfg.Job,
+    Title = "Pilih Job", Values = {"Haybales","Construction"}, Default = "Haybales",
     Callback = function(v) Cfg.Job = v; Farm.VH = {}; Farm.VM = {}; addLog("Job: "..v) end,
 })
 T.Auto:AddToggle("FarmTgl", {
-    Title = "Auto Farm  [RShift]", Default = false,
+    Title = "Auto Farm", Default = false,
     Callback = function(v)
         Cfg.AutoFarm = v
         if v then task.spawn(runFarm) end
         addLog(v and "▶ Farm mulai" or "⏹ Farm stop")
     end,
 })
-T.Auto:AddSlider("DelaySldr", {
-    Title = "Farm Delay (detik)", Default = Cfg.FarmDelay * 1000, Min = 20, Max = 500, Rounding = 0,
-    Callback = function(v) Cfg.FarmDelay = v / 1000 end,
-})
-T.Auto:AddToggle("AutoStopTgl", {
-    Title = "Auto Stop", Default = Cfg.AutoStop,
-    Callback = function(v) Cfg.AutoStop = v end,
-})
-T.Auto:AddSlider("AutoStopSldr", {
-    Title = "Stop setelah (menit)", Default = Cfg.AutoStopMins, Min = 5, Max = 300, Rounding = 0,
-    Callback = function(v) Cfg.AutoStopMins = v end,
-})
 local miniLog = T.Auto:AddParagraph({Title = "Activity Log", Content = "Idle..."})
 
+-- ── TELEPORT ──
 T.TP:AddButton({Title = "🌾  Haybales Area",     Callback = function() fastTP(TPos.JobHorse);   addLog("TP: Haybales") end})
 T.TP:AddButton({Title = "🏗️  Construction Area", Callback = function() fastTP(TPos.JobConst);   addLog("TP: Construction") end})
 T.TP:AddButton({Title = "⛽  Gas Station",        Callback = function() fastTP(TPos.GasStation); addLog("TP: Gas Station") end})
@@ -780,26 +748,28 @@ T.TP:AddButton({
     end,
 })
 
+-- ── PLAYERS ──
 T.Play:AddToggle("ESPTgl", {
     Title = "Player ESP", Default = false,
     Callback = function(v) setESP(v); addLog("ESP: "..(v and "ON" or "OFF")) end,
 })
 local playerInfo = T.Play:AddParagraph({Title = "Players Online", Content = "..."})
 
+-- ── SETTINGS ──
 T.Set:AddToggle("WalkTgl", {
-    Title = "WalkSpeed Boost", Default = Cfg.WalkBoost,
+    Title = "WalkSpeed Boost", Default = false,
     Callback = function(v) Cfg.WalkBoost = v; applyBoost() end,
 })
 T.Set:AddSlider("WalkSldr", {
-    Title = "Walk Speed", Default = Cfg.WalkSpeed, Min = 16, Max = 150, Rounding = 0,
+    Title = "Walk Speed", Default = 50, Min = 16, Max = 120, Rounding = 0,
     Callback = function(v) Cfg.WalkSpeed = v; if Cfg.WalkBoost then applyBoost() end end,
 })
 T.Set:AddToggle("JumpTgl", {
-    Title = "JumpPower Boost", Default = Cfg.JumpBoost,
+    Title = "JumpPower Boost", Default = false,
     Callback = function(v) Cfg.JumpBoost = v; applyBoost() end,
 })
 T.Set:AddSlider("JumpSldr", {
-    Title = "Jump Power", Default = Cfg.JumpPower, Min = 50, Max = 300, Rounding = 0,
+    Title = "Jump Power", Default = 80, Min = 50, Max = 300, Rounding = 0,
     Callback = function(v) Cfg.JumpPower = v; if Cfg.JumpBoost then applyBoost() end end,
 })
 T.Set:AddToggle("NoclipTgl", {
@@ -811,7 +781,7 @@ T.Set:AddToggle("FlyTgl", {
     Callback = function(v) setFly(v) end,
 })
 T.Set:AddSlider("FlySldr", {
-    Title = "Fly Speed", Default = Cfg.FlySpeed, Min = 10, Max = 200, Rounding = 0,
+    Title = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0,
     Callback = function(v) Cfg.FlySpeed = v end,
 })
 T.Set:AddToggle("GodTgl", {
@@ -819,15 +789,15 @@ T.Set:AddToggle("GodTgl", {
     Callback = function(v) setGod(v) end,
 })
 T.Set:AddToggle("AntiAFKTgl", {
-    Title = "Anti-AFK", Default = Cfg.AntiAFK,
+    Title = "Anti-AFK", Default = true,
     Callback = function(v) Cfg.AntiAFK = v end,
 })
 T.Set:AddToggle("RefuelTgl", {
-    Title = "Auto Refuel", Default = Cfg.AutoRefuel,
+    Title = "Auto Refuel", Default = false,
     Callback = function(v) Cfg.AutoRefuel = v end,
 })
 T.Set:AddToggle("ReconTgl", {
-    Title = "Auto Reconnect", Default = Cfg.AutoReconnect,
+    Title = "Auto Reconnect", Default = true,
     Callback = function(v) Cfg.AutoReconnect = v end,
 })
 T.Set:AddToggle("StreamTgl", {
@@ -856,34 +826,21 @@ T.Set:AddToggle("StreamTgl", {
     end,
 })
 T.Set:AddInput("AutoExecInput", {
-    Title = "Auto-Exec URL", Placeholder = "https://raw.githubusercontent.com/.../script.lua",
+    Title = "Auto-Exec URL (post-reconnect)",
+    Placeholder = "https://raw.githubusercontent.com/.../script.lua",
     Callback = function(v) Cfg.AutoExecURL = v end,
 })
-T.Set:AddButton({
-    Title = "💾 Save Config",
-    Callback = function()
-        saveConfig()
-        Fluent:Notify({Title="Config", Content="Tersimpan ke "..CONFIG_PATH, Duration=3})
-        addLog("Config disimpan")
-    end,
-})
-T.Set:AddButton({
-    Title = "📂 Load Config",
-    Callback = function()
-        loadConfig()
-        Fluent:Notify({Title="Config", Content="Config dimuat.", Duration=3})
-    end,
-})
 
+-- ── PERFORMANCE ──
 T.Perf:AddDropdown("FPSDrop", {
-    Title = "FPS Cap", Values = {"60","120","144","240","Unlimited"}, Default = Cfg.FPSCap,
+    Title = "FPS Cap", Values = {"60","120","144","240","Unlimited"}, Default = "60",
     Callback = function(v)
         setFPS(v); addLog("FPS: "..v)
         Fluent:Notify({Title="FPS", Content="FPS cap: "..v, Duration=3})
     end,
 })
 T.Perf:AddToggle("PerfTgl", {
-    Title = "Performance Mode", Default = Cfg.PerfMode,
+    Title = "Performance Mode", Default = false,
     Callback = function(v) setPerfMode(v) end,
 })
 T.Perf:AddButton({
@@ -894,6 +851,7 @@ T.Perf:AddButton({
     end,
 })
 
+-- ── WEBHOOK ──
 T.Hook:AddInput("WebURL", {
     Title = "Webhook URL", Placeholder = "https://discord.com/api/webhooks/...",
     Callback = function(v) Cfg.WebhookURL = v end,
@@ -914,6 +872,9 @@ T.Hook:AddButton({
     end,
 })
 
+-- ─────────────────────────────────────────
+--  MONITOR LOOP
+-- ─────────────────────────────────────────
 task.spawn(function()
     task.wait(2)
     local function safeSet(obj, data)
@@ -923,25 +884,19 @@ task.spawn(function()
         pcall(function()
             local ps  = LP:FindFirstChild("leaderstats")
             local cur = ps and ps:FindFirstChild("Money") and ps.Money.Value or 0
+            -- Retry StartMoney if still 0 and we have a valid value
             if Ses.StartMoney == 0 and cur > 0 then Ses.StartMoney = cur end
             Ses.CurrentProfit = math.max(0, cur - Ses.StartMoney)
             local elapsed = math.max(1, math.floor((os.time() - Ses.StartTime) / 60))
             local pph     = math.floor(Ses.CurrentProfit / elapsed * 60)
-            local ping    = math.floor(LP:GetNetworkPing() * 1000)
-
-            local farmLine = ""
-            if Cfg.AutoFarm and Ses.FarmStart > 0 and Cfg.AutoStop then
-                local rem = math.max(0, Cfg.AutoStopMins - math.floor((os.time() - Ses.FarmStart) / 60))
-                farmLine = "  ·  stop dalam "..rem.."m"
-            end
+            local icon    = Cfg.AutoFarm and "●" or "○"
+            local status  = Cfg.AutoFarm and "FARMING" or "Idle"
 
             safeSet(miniLog, {
                 Title   = "Activity Log",
-                Content = ("%s %s  |  %s%s\n$%d profit  ·  ~$%d/jam  ·  %dm  ·  🏓%dms  ·  📦%d\n%s"):format(
-                    Cfg.AutoFarm and "●" or "○",
-                    Cfg.AutoFarm and "FARMING" or "Idle",
-                    Cfg.Job, farmLine,
-                    Ses.CurrentProfit, pph, elapsed, ping, Ses.Deliveries,
+                Content = ("%s %s  |  %s\n$%d profit  ·  ~$%d/jam  ·  %dm\n────────────────\n%s"):format(
+                    icon, status, Cfg.Job,
+                    Ses.CurrentProfit, pph, elapsed,
                     #Ses.Logs > 0 and table.concat(Ses.Logs, "\n") or "Belum ada aktivitas."
                 )
             })
@@ -959,90 +914,141 @@ task.spawn(function()
     end
 end)
 
+-- ─────────────────────────────────────────
+--  EXECUTE ANIMATION
+--  Phase 1: Card scale-up + slide-in (spring bounce)
+--  Phase 2: Shimmer sweep left→right
+--  Phase 3: Typewriter on subtitle
+--  Phase 4: Stroke pulse glow
+--  Phase 5: 2.5s hold
+--  Phase 6: Scale-shrink + fade + slide-up exit
+-- ─────────────────────────────────────────
 Win:SelectTab(1)
-addLog("✅ V2.1 siap")
+addLog("✅ V2.0 siap!")
 
 task.spawn(function()
     local gui = Instance.new("ScreenGui")
-    gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "FlowExec21", false, 200
+    gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "FlowExec20", false, 200
     gui.Parent = Svc.CoreGui
 
+    -- Card
     local card = Instance.new("Frame", gui)
-    card.AnchorPoint      = Vector2.new(0.5, 0)
-    card.Size             = UDim2.new(0, 260, 0, 4)
-    card.Position         = UDim2.new(0.5, 0, 0, -80)
+    card.AnchorPoint    = Vector2.new(0.5, 0)
+    card.Size           = UDim2.new(0, 260, 0, 72)
+    card.Position       = UDim2.new(0.5, 0, 0, -80)
     card.BackgroundColor3 = C.BG
     card.BorderSizePixel  = 0
     card.ClipsDescendants = true
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
 
+    -- Grey border line
     local border = Instance.new("UIStroke", card)
     border.Color, border.Thickness = C.LINE, 1
 
+    -- Left accent bar
     local leftBar = Instance.new("Frame", card)
-    leftBar.Size, leftBar.Position = UDim2.new(0, 2, 0.7, 0), UDim2.new(0, 0, 0.15, 0)
-    leftBar.BackgroundColor3, leftBar.BorderSizePixel = C.ACCENT, 0
+    leftBar.Size             = UDim2.new(0, 2, 0.7, 0)
+    leftBar.Position         = UDim2.new(0, 0, 0.15, 0)
+    leftBar.BackgroundColor3 = C.ACCENT
+    leftBar.BorderSizePixel  = 0
     Instance.new("UICorner", leftBar).CornerRadius = UDim.new(0, 2)
 
+    -- Top hairline (grey)
     local topLine = Instance.new("Frame", card)
-    topLine.Size, topLine.Position = UDim2.new(1, -20, 0, 1), UDim2.new(0, 10, 0, 0)
-    topLine.BackgroundColor3, topLine.BorderSizePixel = C.LINE, 0
+    topLine.Size             = UDim2.new(1, -20, 0, 1)
+    topLine.Position         = UDim2.new(0, 10, 0, 0)
+    topLine.BackgroundColor3 = C.LINE
+    topLine.BorderSizePixel  = 0
 
+    -- Title
     local title = Instance.new("TextLabel", card)
-    title.Size, title.Position = UDim2.new(1, -22, 0, 28), UDim2.new(0, 14, 0, 10)
-    title.BackgroundTransparency, title.Font = 1, Enum.Font.GothamBold
-    title.Text, title.TextColor3, title.TextSize = "FLOW STUDIO", C.TEXT, 15
-    title.TextXAlignment, title.TextTransparency = Enum.TextXAlignment.Left, 1
+    title.Size               = UDim2.new(1, -22, 0, 28)
+    title.Position           = UDim2.new(0, 14, 0, 10)
+    title.BackgroundTransparency = 1
+    title.Font               = Enum.Font.GothamBold
+    title.Text               = "FLOW STUDIO"
+    title.TextColor3         = C.TEXT
+    title.TextSize           = 15
+    title.TextXAlignment     = Enum.TextXAlignment.Left
+    title.TextTransparency   = 1
 
+    -- Subtitle (typewriter target)
     local sub = Instance.new("TextLabel", card)
-    sub.Size, sub.Position = UDim2.new(1, -22, 0, 18), UDim2.new(0, 14, 0, 42)
-    sub.BackgroundTransparency, sub.Font = 1, Enum.Font.Gotham
-    sub.Text, sub.TextColor3, sub.TextSize = "", C.MUTED, 11
-    sub.TextXAlignment = Enum.TextXAlignment.Left
+    sub.Size               = UDim2.new(1, -22, 0, 18)
+    sub.Position           = UDim2.new(0, 14, 0, 42)
+    sub.BackgroundTransparency = 1
+    sub.Font               = Enum.Font.Gotham
+    sub.Text               = ""
+    sub.TextColor3         = C.MUTED
+    sub.TextSize           = 11
+    sub.TextXAlignment     = Enum.TextXAlignment.Left
+    sub.TextTransparency   = 0
 
+    -- Version badge (right side)
     local badge = Instance.new("TextLabel", card)
-    badge.Size, badge.Position = UDim2.new(0, 60, 0, 18), UDim2.new(1, -68, 0, 10)
-    badge.BackgroundColor3, badge.BorderSizePixel = Color3.fromRGB(14, 9, 26), 0
-    badge.Font, badge.Text, badge.TextColor3, badge.TextSize = Enum.Font.GothamBold, "V2.1", C.ACCENT, 11
-    badge.TextXAlignment, badge.TextTransparency = Enum.TextXAlignment.Center, 1
+    badge.Size               = UDim2.new(0, 60, 0, 18)
+    badge.Position           = UDim2.new(1, -68, 0, 10)
+    badge.BackgroundColor3   = Color3.fromRGB(18, 12, 32)
+    badge.BorderSizePixel    = 0
+    badge.Font               = Enum.Font.GothamBold
+    badge.Text               = "V2.0"
+    badge.TextColor3         = C.ACCENT
+    badge.TextSize           = 11
+    badge.TextXAlignment     = Enum.TextXAlignment.Center
+    badge.TextTransparency   = 1
     Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 6)
     local badgeLine = Instance.new("UIStroke", badge)
     badgeLine.Color, badgeLine.Thickness = C.ACCENT, 1
 
+    -- Shimmer frame (starts left, sweeps right, ClipsDescendants on card handles crop)
     local shimmer = Instance.new("Frame", card)
-    shimmer.Size, shimmer.Position = UDim2.new(0, 40, 1, 0), UDim2.new(-0.2, 0, 0, 0)
-    shimmer.BackgroundColor3, shimmer.BackgroundTransparency = Color3.fromRGB(255,255,255), 0.88
-    shimmer.BorderSizePixel, shimmer.Rotation = 0, 12
+    shimmer.Size             = UDim2.new(0, 40, 1, 0)
+    shimmer.Position         = UDim2.new(-0.2, 0, 0, 0)
+    shimmer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    shimmer.BackgroundTransparency = 0.88
+    shimmer.BorderSizePixel  = 0
+    shimmer.Rotation         = 12
 
-    TW:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    -- PHASE 1: Slide in + fade title/badge
+    card.Size = UDim2.new(0, 260, 0, 4)   -- start flat (squished height)
+    TW:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, 0), {
         Position = UDim2.new(0.5, 0, 0, 18),
         Size     = UDim2.new(0, 260, 0, 72),
     }):Play()
+
     task.wait(0.22)
 
+    -- Fade in title + badge simultaneously with card expansion
     TW:Create(title, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
     TW:Create(badge, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+
     task.wait(0.35)
 
+    -- PHASE 2: Shimmer sweep
     TW:Create(shimmer, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
         Position = UDim2.new(1.1, 0, 0, 0)
     }):Play()
 
-    local subFull = "V2.1 Premium  ·  All systems ready"
+    -- PHASE 3: Typewriter on subtitle (runs parallel to shimmer)
+    local subText = "V2.0 Premium  ·  All systems ready"
     task.spawn(function()
-        for i = 1, #subFull do
-            sub.Text = subFull:sub(1, i)
+        for i = 1, #subText do
+            sub.Text = subText:sub(1, i)
             task.wait(0.032)
         end
     end)
+
     task.wait(0.25)
 
+    -- PHASE 4: Border pulse — grey → accent → grey
     TW:Create(border, TweenInfo.new(0.2), {Color = C.ACCENT, Thickness = 1.5}):Play()
     task.wait(0.22)
     TW:Create(border, TweenInfo.new(0.4), {Color = C.LINE, Thickness = 1}):Play()
 
+    -- PHASE 5: Hold
     task.wait(2.4)
 
+    -- PHASE 6: Exit — children fade first, then card shrinks + slides up
     TW:Create(title,   TweenInfo.new(0.25), {TextTransparency = 1}):Play()
     TW:Create(sub,     TweenInfo.new(0.25), {TextTransparency = 1}):Play()
     TW:Create(badge,   TweenInfo.new(0.25), {TextTransparency = 1}):Play()
@@ -1051,11 +1057,13 @@ task.spawn(function()
     TW:Create(border,  TweenInfo.new(0.25), {Transparency = 1}):Play()
     task.wait(0.2)
 
+    -- Card squish-out + slide up
     TW:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Position = UDim2.new(0.5, 0, 0, -80),
-        Size     = UDim2.new(0, 260, 0, 4),
+        Position          = UDim2.new(0.5, 0, 0, -80),
+        Size              = UDim2.new(0, 260, 0, 4),
         BackgroundTransparency = 1,
     }):Play()
+
     task.wait(0.4)
     gui:Destroy()
 end)
