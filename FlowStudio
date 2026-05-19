@@ -1,4 +1,4 @@
--- FLOW STUDIO V2.0 | Developer: Theo | Hub: Flow Hub
+-- FLOW STUDIO V1.9 | Developer: Theo | Hub: Flow Hub
 
 local Svc = {
     Players          = game:GetService("Players"),
@@ -17,26 +17,13 @@ local Svc = {
 local LP = Svc.Players.LocalPlayer
 local TW = Svc.TweenService
 
--- Color palette — blackest possible, grey lines only
-local C = {
-    BG       = Color3.fromRGB(4,   4,   6),    -- true black background
-    CARD     = Color3.fromRGB(8,   8,  11),    -- card surfaces
-    LINE     = Color3.fromRGB(32,  32,  36),   -- grey separator lines
-    ACCENT   = Color3.fromRGB(138, 92,  226),  -- purple accent
-    ACCENTHI = Color3.fromRGB(165, 120, 255),  -- lighter accent for hover
-    TEXT     = Color3.fromRGB(210, 210, 220),  -- primary text
-    MUTED    = Color3.fromRGB(75,  75,  85),   -- muted text
-    GREEN    = Color3.fromRGB(80,  220, 130),
-    RED      = Color3.fromRGB(255, 80,  80),
-}
-
 local reqFunc
 do
     local c = {}
-    if syn  and type(syn.request)  == "function" then c[#c+1] = syn.request  end
-    if http and type(http.request) == "function" then c[#c+1] = http.request end
-    if      type(http_request)     == "function" then c[#c+1] = http_request end
-    if      type(request)          == "function" then c[#c+1] = request      end
+    if syn  and type(syn.request)    == "function" then c[#c+1] = syn.request    end
+    if http and type(http.request)   == "function" then c[#c+1] = http.request   end
+    if      type(http_request)       == "function" then c[#c+1] = http_request   end
+    if      type(request)            == "function" then c[#c+1] = request        end
     reqFunc = c[1]
 end
 
@@ -226,17 +213,18 @@ local function setFly(on)
     if flyConn then flyConn:Disconnect(); flyConn = nil end
     local char = LP.Character
     if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    local hum  = char:FindFirstChild("Humanoid")
+    local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
     if not root or not hum then return end
     if flyBV    then pcall(function() flyBV:Destroy()    end); flyBV    = nil end
     if flyBGyro then pcall(function() flyBGyro:Destroy() end); flyBGyro = nil end
     if on then
         hum.PlatformStand = true
         flyBV = Instance.new("BodyVelocity", root)
-        flyBV.MaxForce, flyBV.Velocity = Vector3.new(1e5,1e5,1e5), Vector3.zero
+        flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        flyBV.Velocity = Vector3.zero
         flyBGyro = Instance.new("BodyGyro", root)
-        flyBGyro.MaxTorque, flyBGyro.P = Vector3.new(1e5,1e5,1e5), 1e4
+        flyBGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+        flyBGyro.P = 1e4
         flyConn = Svc.RunService.RenderStepped:Connect(function()
             if not Cfg.Fly or not flyBV or not flyBV.Parent then return end
             local cam = Svc.Workspace.CurrentCamera
@@ -244,7 +232,7 @@ local function setFly(on)
             local fwd = (UIS:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
             local rgt = (UIS:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
             local up  = (UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0)
-            flyBV.Velocity  = (cam.CFrame.LookVector*fwd + cam.CFrame.RightVector*rgt + Vector3.new(0,1,0)*up) * Cfg.FlySpeed
+            flyBV.Velocity = (cam.CFrame.LookVector*fwd + cam.CFrame.RightVector*rgt + Vector3.new(0,1,0)*up) * Cfg.FlySpeed
             flyBGyro.CFrame = cam.CFrame
         end)
     else
@@ -267,6 +255,7 @@ local function setGod(on)
     end
 end
 
+-- Satu CharacterAdded untuk semua re-apply
 LP.CharacterAdded:Connect(function(char)
     local hum = char:WaitForChild("Humanoid", 5)
     if not hum then return end
@@ -296,19 +285,21 @@ local function addESP(p)
     if p.Character:FindFirstChild("_FlowESP") then return end
     local hl = Instance.new("Highlight", p.Character)
     hl.Name = "_FlowESP"
-    hl.FillColor, hl.OutlineColor = C.ACCENT, Color3.fromRGB(255,255,255)
-    hl.FillTransparency, hl.OutlineTransparency = 0.5, 0
+    hl.FillColor = Color3.fromRGB(138, 92, 226)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.5
+    hl.OutlineTransparency = 0
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 end
 local function setESP(on)
     clearESP(); Cfg.ESP = on
     if not on then return end
     for _, p in ipairs(Svc.Players:GetPlayers()) do addESP(p) end
-    espConns[#espConns+1] = Svc.Players.PlayerAdded:Connect(function(p)
-        espConns[#espConns+1] = p.CharacterAdded:Connect(function()
+    table.insert(espConns, Svc.Players.PlayerAdded:Connect(function(p)
+        table.insert(espConns, p.CharacterAdded:Connect(function()
             task.wait(1); if Cfg.ESP then addESP(p) end
-        end)
-    end)
+        end))
+    end))
 end
 
 -- ─────────────────────────────────────────
@@ -412,60 +403,58 @@ local function runFarm()
     addLog("▶ Farm: " .. Cfg.Job)
 
     while Cfg.AutoFarm do
-        if not getRoot() then
-            task.wait(1)
-        else
-            if Cfg.AutoRefuel then
-                local hum = getHum()
-                if hum and hum.SeatPart then
-                    local veh  = hum.SeatPart.Parent
-                    local fuel = veh and (veh:FindFirstChild("Fuel") or veh:FindFirstChild("Gas"))
-                    if fuel and fuel.Value < 20 then
-                        addLog("⛽ Refuel...")
-                        if veh.PrimaryPart then
-                            pcall(function() veh:SetPrimaryPartCFrame(CFrame.new(TPos.GasStation + Vector3.new(0,2,0))) end)
-                        else fastTP(TPos.GasStation) end
-                        task.wait(1)
-                        fireNearby({"fill","refuel","gas","pump"}, 5)
-                    end
+        if not getRoot() then task.wait(1) else
+
+        if Cfg.AutoRefuel then
+            local hum = getHum()
+            if hum and hum.SeatPart then
+                local veh = hum.SeatPart.Parent
+                local fuel = veh and (veh:FindFirstChild("Fuel") or veh:FindFirstChild("Gas"))
+                if fuel and fuel.Value < 20 then
+                    addLog("⛽ Refuel...")
+                    if veh.PrimaryPart then
+                        pcall(function() veh:SetPrimaryPartCFrame(CFrame.new(TPos.GasStation + Vector3.new(0,2,0))) end)
+                    else fastTP(TPos.GasStation) end
+                    task.wait(1); fireNearby({"fill","refuel","gas","pump"}, 5)
                 end
             end
+        end
 
-            if Cfg.Job == "Haybales" then
-                if not findItem(HAY_ITEMS) then
-                    fastTP(TPos.HaySupply); task.wait(0.08)
-                    fireNearby(HAY_PICKUP); task.wait(0.3)
-                    if findItem(HAY_ITEMS) then
-                        Farm.VH = {}; addLog("🌾 Hay diambil")
-                    else
-                        addLog("⚠️ Gagal ambil hay"); task.wait(0.5)
-                    end
+        if Cfg.Job == "Haybales" then
+            if not findItem(HAY_ITEMS) then
+                fastTP(TPos.HaySupply); task.wait(0.08)
+                fireNearby(HAY_PICKUP); task.wait(0.3)
+                if findItem(HAY_ITEMS) then
+                    Farm.VH = {}; addLog("🌾 Hay diambil")
                 else
-                    local res = smartDeliver(Targets.Horses, Farm.VH, HAY_ITEMS, HAY_DELIVER)
-                    if res == "ok"      then Farm.VH = {}
-                    elseif res == "allDone" then addLog("🔄 Semua kuda kenyang, 3s"); Farm.VH = {}; task.wait(3)
-                    elseif res == "stop"    then break end
+                    addLog("⚠️ Gagal ambil hay"); task.wait(0.5)
                 end
-
-            elseif Cfg.Job == "Construction" then
-                if not findItem(CEM_ITEMS) then
-                    fastTP(TPos.CemSupply); task.wait(0.08)
-                    fireNearby(CEM_PICKUP); task.wait(0.3)
-                    if findItem(CEM_ITEMS) then
-                        Farm.VM = {}; addLog("🧱 Semen diambil")
-                    else
-                        addLog("⚠️ Gagal ambil semen"); task.wait(0.5)
-                    end
-                else
-                    local res = smartDeliver(Targets.Mixers, Farm.VM, CEM_ITEMS, CEM_DELIVER)
-                    if res == "ok"      then Farm.VM = {}
-                    elseif res == "allDone" then addLog("🔄 Semua mixer penuh, 3s"); Farm.VM = {}; task.wait(3)
-                    elseif res == "stop"    then break end
-                end
+            else
+                local res = smartDeliver(Targets.Horses, Farm.VH, HAY_ITEMS, HAY_DELIVER)
+                if res == "ok" then Farm.VH = {}
+                elseif res == "allDone" then addLog("🔄 Semua kuda kenyang, 3s"); Farm.VH = {}; task.wait(3)
+                elseif res == "stop" then break end
             end
 
-            SendWebhook("Update")
-            task.wait(0.02)
+        elseif Cfg.Job == "Construction" then
+            if not findItem(CEM_ITEMS) then
+                fastTP(TPos.CemSupply); task.wait(0.08)
+                fireNearby(CEM_PICKUP); task.wait(0.3)
+                if findItem(CEM_ITEMS) then
+                    Farm.VM = {}; addLog("🧱 Semen diambil")
+                else
+                    addLog("⚠️ Gagal ambil semen"); task.wait(0.5)
+                end
+            else
+                local res = smartDeliver(Targets.Mixers, Farm.VM, CEM_ITEMS, CEM_DELIVER)
+                if res == "ok" then Farm.VM = {}
+                elseif res == "allDone" then addLog("🔄 Semua mixer penuh, 3s"); Farm.VM = {}; task.wait(3)
+                elseif res == "stop" then break end
+            end
+        end
+
+        SendWebhook("Update")
+        task.wait(0.02)
         end
     end
 
@@ -504,43 +493,30 @@ game:BindToClose(function() onDisconnect("Game closing"); task.wait(2) end)
 LP.AncestryChanged:Connect(function(_, p) if not p then onDisconnect("Removed") end end)
 
 -- ─────────────────────────────────────────
---  TOGGLE BUTTON
+--  TOGGLE BUTTON (Draggable)
 -- ─────────────────────────────────────────
 local TogUI = Instance.new("ScreenGui")
-TogUI.Name, TogUI.ResetOnSpawn, TogUI.DisplayOrder = "FlowTog20", false, 100
+TogUI.Name = "FlowTog19"
+TogUI.ResetOnSpawn = false
+TogUI.DisplayOrder = 100
 TogUI.Parent = Svc.CoreGui
 
 local Tog = Instance.new("TextButton", TogUI)
-Tog.Size             = UDim2.new(0, 118, 0, 40)
-Tog.Position         = UDim2.new(0, 10, 0.5, -20)
-Tog.BackgroundColor3 = C.BG
-Tog.TextColor3       = C.ACCENT
-Tog.Font             = Enum.Font.GothamBold
-Tog.Text             = "⚡  FLOW"
-Tog.TextSize         = 13
-Tog.AutoButtonColor  = false
-Instance.new("UICorner", Tog).CornerRadius = UDim.new(0, 10)
+Tog.Size = UDim2.new(0, 115, 0, 42)
+Tog.Position = UDim2.new(0, 12, 0.5, -21)
+Tog.BackgroundColor3 = Color3.fromRGB(20, 16, 30)
+Tog.TextColor3 = Color3.fromRGB(180, 140, 255)
+Tog.Font = Enum.Font.GothamBold
+Tog.Text = "⚡ FLOW"
+Tog.TextSize = 13
+Tog.AutoButtonColor = false
+Instance.new("UICorner", Tog).CornerRadius = UDim.new(0, 12)
+local togStroke = Instance.new("UIStroke", Tog)
+togStroke.Color = Color3.fromRGB(138, 92, 226)
+togStroke.Thickness = 1.5
 
-local togLine = Instance.new("UIStroke", Tog)
-togLine.Color, togLine.Thickness = C.LINE, 1
-
--- Accent highlight bar at top of button
-local togAccent = Instance.new("Frame", Tog)
-togAccent.Size             = UDim2.new(0.6, 0, 0, 1)
-togAccent.Position         = UDim2.new(0.2, 0, 0, 0)
-togAccent.BackgroundColor3 = C.ACCENT
-togAccent.BorderSizePixel  = 0
-
-Tog.MouseEnter:Connect(function()
-    TW:Create(Tog,      TweenInfo.new(0.15), {BackgroundColor3 = C.CARD}):Play()
-    TW:Create(togLine,  TweenInfo.new(0.15), {Color = C.ACCENT}):Play()
-end)
-Tog.MouseLeave:Connect(function()
-    if not Cfg.AutoFarm then
-        TW:Create(Tog,     TweenInfo.new(0.15), {BackgroundColor3 = C.BG}):Play()
-        TW:Create(togLine, TweenInfo.new(0.15), {Color = C.LINE}):Play()
-    end
-end)
+Tog.MouseEnter:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(32, 24, 50) end)
+Tog.MouseLeave:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(20, 16, 30) end)
 
 local dragging, dragStart, btnStart
 Tog.InputBegan:Connect(function(inp)
@@ -566,95 +542,35 @@ task.spawn(function()
     while true do
         task.wait(0.5)
         if Cfg.AutoFarm then
-            TW:Create(Tog,       TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(6,14,8)}):Play()
-            TW:Create(togLine,   TweenInfo.new(0.2), {Color = C.GREEN}):Play()
-            TW:Create(togAccent, TweenInfo.new(0.2), {BackgroundColor3 = C.GREEN}):Play()
-            Tog.TextColor3 = C.GREEN
-            Tog.Text = "🟢  FARMING"
+            Tog.Text = "🟢 FARMING"
+            Tog.TextColor3 = Color3.fromRGB(100, 255, 160)
+            togStroke.Color = Color3.fromRGB(80, 220, 140)
         else
-            TW:Create(Tog,       TweenInfo.new(0.2), {BackgroundColor3 = C.BG}):Play()
-            TW:Create(togLine,   TweenInfo.new(0.2), {Color = C.LINE}):Play()
-            TW:Create(togAccent, TweenInfo.new(0.2), {BackgroundColor3 = C.ACCENT}):Play()
-            Tog.TextColor3 = C.ACCENT
-            Tog.Text = "⚡  FLOW"
+            Tog.Text = "⚡ FLOW"
+            Tog.TextColor3 = Color3.fromRGB(180, 140, 255)
+            togStroke.Color = Color3.fromRGB(138, 92, 226)
         end
     end
 end)
 
 -- ─────────────────────────────────────────
---  FLUENT
+--  FLUENT (blocking, no fake bar needed)
 -- ─────────────────────────────────────────
 local Fluent = loadstring(game:HttpGet(
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 ))()
 
+-- ─────────────────────────────────────────
+--  UI
+-- ─────────────────────────────────────────
 local Win = Fluent:CreateWindow({
     Title    = "Flow Studio",
-    SubTitle = "V2.0 Premium",
+    SubTitle = "V1.9 Premium",
     TabWidth = 150,
-    Size     = UDim2.fromOffset(590, 490),
+    Size     = UDim2.fromOffset(590, 480),
     Theme    = "Darker",
 })
 
--- ─────────────────────────────────────────
---  UI COLOR OVERRIDE — apply blackest theme
---  Runs after Fluent init, iterates all descendants
---  and replaces near-black backgrounds with true black,
---  and non-accent strokes with grey lines.
--- ─────────────────────────────────────────
-task.spawn(function()
-    task.wait(0.05)
-    local fluent_gui
-    for _, g in ipairs(Svc.CoreGui:GetChildren()) do
-        if g:IsA("ScreenGui") and g ~= TogUI then
-            fluent_gui = g; break
-        end
-    end
-    if not fluent_gui then return end
-
-    for _, obj in ipairs(fluent_gui:GetDescendants()) do
-        pcall(function()
-            if obj:IsA("Frame") or obj:IsA("ScrollingFrame") then
-                local r = obj.BackgroundColor3.R * 255
-                local g = obj.BackgroundColor3.G * 255
-                local b = obj.BackgroundColor3.B * 255
-                -- Replace any dark background (not white/light) with true black palette
-                if obj.BackgroundTransparency < 0.9 then
-                    if r < 55 and g < 55 and b < 65 then
-                        -- Very dark → true black
-                        if r < 20 and g < 20 and b < 25 then
-                            obj.BackgroundColor3 = C.BG
-                        else
-                            -- Slightly lighter dark → card black
-                            obj.BackgroundColor3 = C.CARD
-                        end
-                    end
-                end
-            elseif obj:IsA("UIStroke") then
-                local r = obj.Color.R * 255
-                local g = obj.Color.G * 255
-                local b = obj.Color.B * 255
-                -- Keep accent-purple strokes, grey-ify everything else
-                local isPurple = (b > r + 20) and (b > g + 20) and (b > 80)
-                if not isPurple then
-                    obj.Color = C.LINE
-                end
-            elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
-                local r = obj.TextColor3.R * 255
-                local g = obj.TextColor3.G * 255
-                local b = obj.TextColor3.B * 255
-                -- Brighten very dim text to readable level
-                if r > 140 and g > 140 and b > 140 and r < 200 then
-                    obj.TextColor3 = C.TEXT
-                end
-            end
-        end)
-    end
-end)
-
--- ─────────────────────────────────────────
---  TABS
--- ─────────────────────────────────────────
 Tog.MouseButton1Click:Connect(function() pcall(function() Win:Minimize() end) end)
 
 local T = {
@@ -693,10 +609,11 @@ local miniLog = T.Auto:AddParagraph({Title = "Activity Log", Content = "Idle..."
 T.TP:AddButton({Title = "🌾  Haybales Area",     Callback = function() fastTP(TPos.JobHorse);   addLog("TP: Haybales") end})
 T.TP:AddButton({Title = "🏗️  Construction Area", Callback = function() fastTP(TPos.JobConst);   addLog("TP: Construction") end})
 T.TP:AddButton({Title = "⛽  Gas Station",        Callback = function() fastTP(TPos.GasStation); addLog("TP: Gas Station") end})
+
 T.TP:AddParagraph({Title = "Player Teleport", Content = "Pilih pemain → Teleport."})
 
 local selPlayer = {name = ""}
-local initList  = {}
+local initList = {}
 for _, p in ipairs(Svc.Players:GetPlayers()) do
     if p ~= LP then initList[#initList+1] = p.Name end
 end
@@ -714,9 +631,7 @@ T.TP:AddButton({
     Title = "🔄 Refresh List",
     Callback = function()
         local n = 0
-        for _, p in ipairs(Svc.Players:GetPlayers()) do
-            if p ~= LP then n = n + 1 end
-        end
+        for _, p in ipairs(Svc.Players:GetPlayers()) do if p ~= LP then n += 1 end end
         Fluent:Notify({Title="Refresh", Content=n.." pemain ditemukan.", Duration=3})
         addLog("Refresh: "..n.." pemain")
     end,
@@ -811,7 +726,7 @@ T.Set:AddToggle("StreamTgl", {
             if hum then
                 hum.DisplayDistanceType = v
                     and Enum.HumanoidDisplayDistanceType.None
-                    or  Enum.HumanoidDisplayDistanceType.Viewer
+                    or Enum.HumanoidDisplayDistanceType.Viewer
             end
             for _, obj in ipairs(char:GetDescendants()) do
                 pcall(function()
@@ -882,31 +797,29 @@ task.spawn(function()
     end
     while true do
         pcall(function()
-            local ps  = LP:FindFirstChild("leaderstats")
+            local ps = LP:FindFirstChild("leaderstats")
             local cur = ps and ps:FindFirstChild("Money") and ps.Money.Value or 0
-            -- Retry StartMoney if still 0 and we have a valid value
             if Ses.StartMoney == 0 and cur > 0 then Ses.StartMoney = cur end
-            Ses.CurrentProfit = math.max(0, cur - Ses.StartMoney)
+            Ses.CurrentProfit = cur - Ses.StartMoney
             local elapsed = math.max(1, math.floor((os.time() - Ses.StartTime) / 60))
-            local pph     = math.floor(Ses.CurrentProfit / elapsed * 60)
-            local icon    = Cfg.AutoFarm and "●" or "○"
-            local status  = Cfg.AutoFarm and "FARMING" or "Idle"
+            local pph = math.floor(Ses.CurrentProfit / elapsed * 60)
+            local icon = Cfg.AutoFarm and "🟢" or "⚪"
 
             safeSet(miniLog, {
-                Title   = "Activity Log",
-                Content = ("%s %s  |  %s\n$%d profit  ·  ~$%d/jam  ·  %dm\n────────────────\n%s"):format(
-                    icon, status, Cfg.Job,
-                    Ses.CurrentProfit, pph, elapsed,
+                Title = "Activity Log",
+                Content = ("%s %s  |  Job: %s\nProfit: $%d  |  /Jam: ~$%d  |  %dm\n─────────────\n%s"):format(
+                    icon, Cfg.AutoFarm and "FARMING" or "Idle",
+                    Cfg.Job, Ses.CurrentProfit, pph, elapsed,
                     #Ses.Logs > 0 and table.concat(Ses.Logs, "\n") or "Belum ada aktivitas."
                 )
             })
 
             local plist = {}
             for _, p in ipairs(Svc.Players:GetPlayers()) do
-                plist[#plist+1] = (p == LP and "► " or "  ") .. p.Name
+                plist[#plist+1] = (p == LP and "★ " or "  ") .. p.Name
             end
             safeSet(playerInfo, {
-                Title   = "Players Online ("..#Svc.Players:GetPlayers()..")",
+                Title   = "Players ("..#Svc.Players:GetPlayers()..")",
                 Content = table.concat(plist, "\n"),
             })
         end)
@@ -915,155 +828,79 @@ task.spawn(function()
 end)
 
 -- ─────────────────────────────────────────
---  EXECUTE ANIMATION
---  Phase 1: Card scale-up + slide-in (spring bounce)
---  Phase 2: Shimmer sweep left→right
---  Phase 3: Typewriter on subtitle
---  Phase 4: Stroke pulse glow
---  Phase 5: 2.5s hold
---  Phase 6: Scale-shrink + fade + slide-up exit
+--  EXECUTE ANIMATION (muncul setelah semua ready)
+--  Card kecil slide-in dari atas → tahan 2.5s → slide-out + fade
 -- ─────────────────────────────────────────
 Win:SelectTab(1)
-addLog("✅ V2.0 siap!")
+addLog("✅ V1.9 siap!")
 
 task.spawn(function()
     local gui = Instance.new("ScreenGui")
-    gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "FlowExec20", false, 200
+    gui.Name = "FlowExecAnim"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 200
     gui.Parent = Svc.CoreGui
 
-    -- Card
     local card = Instance.new("Frame", gui)
-    card.AnchorPoint    = Vector2.new(0.5, 0)
-    card.Size           = UDim2.new(0, 260, 0, 72)
-    card.Position       = UDim2.new(0.5, 0, 0, -80)
-    card.BackgroundColor3 = C.BG
-    card.BorderSizePixel  = 0
+    card.Size = UDim2.new(0, 240, 0, 62)
+    card.Position = UDim2.new(0.5, -120, 0, -70)   -- mulai di atas layar (tersembunyi)
+    card.BackgroundColor3 = Color3.fromRGB(14, 10, 24)
+    card.BorderSizePixel = 0
     card.ClipsDescendants = true
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
 
-    -- Grey border line
-    local border = Instance.new("UIStroke", card)
-    border.Color, border.Thickness = C.LINE, 1
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Color = Color3.fromRGB(138, 92, 226)
+    stroke.Thickness = 1.5
 
-    -- Left accent bar
-    local leftBar = Instance.new("Frame", card)
-    leftBar.Size             = UDim2.new(0, 2, 0.7, 0)
-    leftBar.Position         = UDim2.new(0, 0, 0.15, 0)
-    leftBar.BackgroundColor3 = C.ACCENT
-    leftBar.BorderSizePixel  = 0
-    Instance.new("UICorner", leftBar).CornerRadius = UDim.new(0, 2)
+    local accent = Instance.new("Frame", card)
+    accent.Size = UDim2.new(0, 3, 1, 0)
+    accent.Position = UDim2.new(0, 0, 0, 0)
+    accent.BackgroundColor3 = Color3.fromRGB(138, 92, 226)
+    accent.BorderSizePixel = 0
+    Instance.new("UICorner", accent).CornerRadius = UDim.new(0, 3)
 
-    -- Top hairline (grey)
-    local topLine = Instance.new("Frame", card)
-    topLine.Size             = UDim2.new(1, -20, 0, 1)
-    topLine.Position         = UDim2.new(0, 10, 0, 0)
-    topLine.BackgroundColor3 = C.LINE
-    topLine.BorderSizePixel  = 0
-
-    -- Title
     local title = Instance.new("TextLabel", card)
-    title.Size               = UDim2.new(1, -22, 0, 28)
-    title.Position           = UDim2.new(0, 14, 0, 10)
+    title.Size = UDim2.new(1, -18, 0, 26)
+    title.Position = UDim2.new(0, 14, 0, 8)
     title.BackgroundTransparency = 1
-    title.Font               = Enum.Font.GothamBold
-    title.Text               = "FLOW STUDIO"
-    title.TextColor3         = C.TEXT
-    title.TextSize           = 15
-    title.TextXAlignment     = Enum.TextXAlignment.Left
-    title.TextTransparency   = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "⚡  FLOW STUDIO"
+    title.TextColor3 = Color3.fromRGB(200, 170, 255)
+    title.TextSize = 14
+    title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Subtitle (typewriter target)
     local sub = Instance.new("TextLabel", card)
-    sub.Size               = UDim2.new(1, -22, 0, 18)
-    sub.Position           = UDim2.new(0, 14, 0, 42)
+    sub.Size = UDim2.new(1, -18, 0, 20)
+    sub.Position = UDim2.new(0, 14, 0, 34)
     sub.BackgroundTransparency = 1
-    sub.Font               = Enum.Font.Gotham
-    sub.Text               = ""
-    sub.TextColor3         = C.MUTED
-    sub.TextSize           = 11
-    sub.TextXAlignment     = Enum.TextXAlignment.Left
-    sub.TextTransparency   = 0
+    sub.Font = Enum.Font.Gotham
+    sub.Text = "V1.9 Premium  ·  Loaded ✓"
+    sub.TextColor3 = Color3.fromRGB(110, 90, 150)
+    sub.TextSize = 11
+    sub.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Version badge (right side)
-    local badge = Instance.new("TextLabel", card)
-    badge.Size               = UDim2.new(0, 60, 0, 18)
-    badge.Position           = UDim2.new(1, -68, 0, 10)
-    badge.BackgroundColor3   = Color3.fromRGB(18, 12, 32)
-    badge.BorderSizePixel    = 0
-    badge.Font               = Enum.Font.GothamBold
-    badge.Text               = "V2.0"
-    badge.TextColor3         = C.ACCENT
-    badge.TextSize           = 11
-    badge.TextXAlignment     = Enum.TextXAlignment.Center
-    badge.TextTransparency   = 1
-    Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 6)
-    local badgeLine = Instance.new("UIStroke", badge)
-    badgeLine.Color, badgeLine.Thickness = C.ACCENT, 1
-
-    -- Shimmer frame (starts left, sweeps right, ClipsDescendants on card handles crop)
-    local shimmer = Instance.new("Frame", card)
-    shimmer.Size             = UDim2.new(0, 40, 1, 0)
-    shimmer.Position         = UDim2.new(-0.2, 0, 0, 0)
-    shimmer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    shimmer.BackgroundTransparency = 0.88
-    shimmer.BorderSizePixel  = 0
-    shimmer.Rotation         = 12
-
-    -- PHASE 1: Slide in + fade title/badge
-    card.Size = UDim2.new(0, 260, 0, 4)   -- start flat (squished height)
-    TW:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, 0), {
-        Position = UDim2.new(0.5, 0, 0, 18),
-        Size     = UDim2.new(0, 260, 0, 72),
+    -- Slide in ke Y = 18px dari atas
+    TW:Create(card, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -120, 0, 18)
     }):Play()
 
-    task.wait(0.22)
+    task.wait(2.8)
 
-    -- Fade in title + badge simultaneously with card expansion
-    TW:Create(title, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
-    TW:Create(badge, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
-
-    task.wait(0.35)
-
-    -- PHASE 2: Shimmer sweep
-    TW:Create(shimmer, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
-        Position = UDim2.new(1.1, 0, 0, 0)
-    }):Play()
-
-    -- PHASE 3: Typewriter on subtitle (runs parallel to shimmer)
-    local subText = "V2.0 Premium  ·  All systems ready"
-    task.spawn(function()
-        for i = 1, #subText do
-            sub.Text = subText:sub(1, i)
-            task.wait(0.032)
-        end
-    end)
-
-    task.wait(0.25)
-
-    -- PHASE 4: Border pulse — grey → accent → grey
-    TW:Create(border, TweenInfo.new(0.2), {Color = C.ACCENT, Thickness = 1.5}):Play()
-    task.wait(0.22)
-    TW:Create(border, TweenInfo.new(0.4), {Color = C.LINE, Thickness = 1}):Play()
-
-    -- PHASE 5: Hold
-    task.wait(2.4)
-
-    -- PHASE 6: Exit — children fade first, then card shrinks + slides up
-    TW:Create(title,   TweenInfo.new(0.25), {TextTransparency = 1}):Play()
-    TW:Create(sub,     TweenInfo.new(0.25), {TextTransparency = 1}):Play()
-    TW:Create(badge,   TweenInfo.new(0.25), {TextTransparency = 1}):Play()
-    TW:Create(topLine, TweenInfo.new(0.25), {BackgroundTransparency = 1}):Play()
-    TW:Create(leftBar, TweenInfo.new(0.25), {BackgroundTransparency = 1}):Play()
-    TW:Create(border,  TweenInfo.new(0.25), {Transparency = 1}):Play()
-    task.wait(0.2)
-
-    -- Card squish-out + slide up
-    TW:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Position          = UDim2.new(0.5, 0, 0, -80),
-        Size              = UDim2.new(0, 260, 0, 4),
+    -- Fade out + slide up
+    TW:Create(card, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Position = UDim2.new(0.5, -120, 0, -70),
         BackgroundTransparency = 1,
     }):Play()
+    TW:Create(stroke, TweenInfo.new(0.4), {Transparency = 1}):Play()
+    for _, obj in ipairs(card:GetDescendants()) do
+        if obj:IsA("TextLabel") then
+            TW:Create(obj, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+        elseif obj:IsA("Frame") then
+            TW:Create(obj, TweenInfo.new(0.35), {BackgroundTransparency = 1}):Play()
+        end
+    end
 
-    task.wait(0.4)
+    task.wait(0.45)
     gui:Destroy()
 end)
