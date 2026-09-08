@@ -1,187 +1,569 @@
+-- Eagle Nation | WindUI. Standalone client script; no saved credentials/config.
+-- Earnings are positive balance changes, not verified job-only rewards.
+-- Disconnect webhooks require the client and HTTP connection to remain alive.
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-
+local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
+local InputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
-local autoFarmAktif = false
+assert(player, "Eagle Nation must run on the client")
 
-local task_wait = task and task.wait or wait
-local task_spawn = task and task.spawn or function(f) coroutine.resume(coroutine.create(f)) end
-
-local success, err = pcall(function()
-    if getconnections then
-        for _, connection in pairs(getconnections(player.Idled)) do
-            connection:Disable()
-        end
-    else
-        local VirtualUser = game:GetService("VirtualUser")
-        player.Idled:Connect(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
-        end)
-    end
+local environment = shared
+if environment.EagleNation and environment.EagleNation.Unload then
+    environment.EagleNation.Unload("Script restarted")
+    task.wait(0.5) -- Allow the previous WindUI destruction animation to finish.
+end
+local WINDUI_URL = "https://raw.githubusercontent.com/Footagesus/WindUI/7dd8a34a6bb59635c7b5f18ce9d46558a8cde138/dist/main.lua"
+local loaded, WindUI = pcall(function()
+    return assert(loadstring(game:HttpGet(WINDUI_URL)), "WindUI could not compile")()
 end)
+if not loaded or type(WindUI) ~= "table" or type(WindUI.CreateWindow) ~= "function" then
+    warn("[Eagle Nation] WindUI unavailable; nothing started.")
+    return
+end
 
-local TitikKuda = {
-    CFrame.new(13350.96, 149.11, 2962.43),
-    CFrame.new(13339.26, 149.11, 2953.07),
-    CFrame.new(13326.39, 149.11, 2941.42),
-    CFrame.new(13315.99, 149.11, 2958.62),
+local Hub = {}
+environment.EagleNation = Hub
+local options = {
+    target = 0, stopAtTarget = true, settle = 1.5, confirmation = 8,
+    maxFailures = 3, antiAFK = false, webhook = "", reports = false,
+    periodic = true, interval = 300, disconnectReport = true, targetReport = true,
+    includePlayer = false,
 }
-
-local TitikWheat = CFrame.new(13382.58, 149.05, 2984.82) 
-
-local function getTitikKudaTerdekat(targetPosition)
-    local jarakTerdekat = math.huge
-    local titikTerbaik = nil
-    
-    for _, titikManual in pairs(TitikKuda) do
-        local jarak = (titikManual.Position - targetPosition).Magnitude
-        if jarak < jarakTerdekat then
-            jarakTerdekat = jarak
-            titikTerbaik = titikManual
-        end
-    end
-    
-    return titikTerbaik
+local state = {
+    alive = true, running = false, generation = 0, disconnected = false,
+    started = os.clock(), ended = nil, earned = 0, spent = 0, balance = nil,
+    initial = nil, targetReached = false, deliveries = 0, failures = 0,
+    status = "Ready", moneyStatus = "Searching for Money / Cash",
+    sourceKey = nil, source = nil, moneyConnection = nil, sources = {},
+    sourceInventory = nil,
+    lastReport = os.clock(), webhookStatus = "Not configured", disconnectStatus = "Checking support",
+}
+local connections, threads = {}, {}
+local Window, farmToggle, sourceDropdown, dashboard, sourceInfo, reportInfo, reportsToggle, afkToggle
+local activePrompt, syncingSource = nil, false
+local setRunning, checkTarget, sendReport, refreshSources
+local function track(connection)
+    table.insert(connections, connection)
+    return connection
 end
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoFarmGUI"
-ScreenGui.ResetOnSpawn = false
-
-local successUI = pcall(function() ScreenGui.Parent = CoreGui end)
-if not successUI then ScreenGui.Parent = player:WaitForChild("PlayerGui") end
-
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 200, 0, 100)
-Frame.Position = UDim2.new(0.5, -100, 0.1, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Frame.BorderSizePixel = 2
-Frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
-Frame.Parent = ScreenGui
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0.4, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "Chudai Hub"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextScaled = true
-Title.Font = Enum.Font.SourceSansBold
-Title.Parent = Frame
-
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.8, 0, 0.4, 0)
-ToggleButton.Position = UDim2.new(0.1, 0, 0.5, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-ToggleButton.Text = "OFF"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.TextScaled = true
-ToggleButton.Font = Enum.Font.SourceSansBold
-ToggleButton.Parent = Frame
-
-local function holdPrompt(prompt)
-    if not prompt then return end
-    local holdTime = prompt.HoldDuration
-    
-    pcall(function() prompt:InputHoldBegin() end)
-    task_wait(holdTime + 0.15)
-    pcall(function() prompt:InputHoldEnd() end)
+local function notify(title, content)
+    if state.alive then pcall(function() WindUI:Notify({Title = title, Content = content, Duration = 5}) end) end
 end
-
-local function doAutoFarm()
-    while autoFarmAktif do
-        task_wait(0.1)
-        
-        local character = player.Character
-        if not character or not character:FindFirstChild("HumanoidRootPart") then 
-            -- Diubah dari bentuk 'continue' karena Lua 5.1 tidak mengenal kata kunci continue
-        else
-            local rootPart = character.HumanoidRootPart
-            local activeDeliveries = Workspace:FindFirstChild("ActiveDeliveries")
-            local packageSites = Workspace:FindFirstChild("PackageSites")
-            local namaDelivery = player.Name .. "_Delivery"
-            local myDelivery = activeDeliveries and activeDeliveries:FindFirstChild(namaDelivery)
-
-            if myDelivery then
-                local prompt = myDelivery:FindFirstChildOfClass("ProximityPrompt", true)
-                if prompt then
-                    local titikPas = getTitikKudaTerdekat(myDelivery.Position)
-                    if titikPas then
-                        rootPart.CFrame = titikPas
-                        rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                        task_wait(1.5)
-                        holdPrompt(prompt)
-                        task_wait(2)
-                    end
-                end
-            else
-                local gatherSite = packageSites and packageSites:FindFirstChild("GatherPackageHay")
-                if gatherSite then
-                    local prompt = gatherSite:FindFirstChildOfClass("ProximityPrompt", true)
-                    if prompt then
-                        rootPart.CFrame = TitikWheat
-                        rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                        task_wait(1.5)
-                        holdPrompt(prompt)
-                        task_wait(0.1) 
-                    end
-                else
-                    local tpPoints = Workspace:FindFirstChild("TeleportPoints")
-                    if tpPoints then
-                        local teleportRanch = tpPoints:FindFirstChild("TeleportRanch")
-                        if teleportRanch then
-                            rootPart.CFrame = teleportRanch:GetPivot() + Vector3.new(0, 3, 0)
-                            rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                            task_wait(0.1) 
-                        end
-                    end
-                end
-            end
-        end
+local function number(value)
+    if type(value) == "string" then value = tonumber((value:gsub(",", ""):gsub("%s", ""))) end
+    if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return nil end
+    return value
+end
+local function amount(value)
+    if value == nil then return "Unavailable" end
+    local digits = string.format("%.0f", math.abs(value))
+    return (value < 0 and "-" or "") .. (digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
+end
+local function elapsed()
+    return math.max(0, (state.ended or os.clock()) - state.started)
+end
+local function duration(seconds)
+    return string.format("%02dh %02dm %02ds (%.2f hours)", math.floor(seconds / 3600), math.floor(seconds / 60) % 60, math.floor(seconds) % 60, seconds / 3600)
+end
+local function releasePrompt()
+    local prompt = activePrompt
+    activePrompt = nil
+    if prompt then pcall(function() prompt:InputHoldEnd() end) end
+end
+local function updateParagraph(control, text)
+    if control and state.alive then control.ParagraphFrame:SetDesc(text) end
+end
+local function resetAccounting()
+    state.earned, state.spent, state.deliveries = 0, 0, 0
+    state.initial = state.balance
+    state.started, state.targetReached = os.clock(), false
+    state.lastReport = os.clock()
+end
+local function pauseForMissingMoney()
+    if setRunning and state.running and options.target > 0 and options.stopAtTarget then
+        setRunning(false, "Money tracking unavailable; target protection paused farming")
     end
 end
 
-local function handleToggle()
-    autoFarmAktif = not autoFarmAktif
-    if autoFarmAktif then
-        ToggleButton.Text = "ON"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        task_spawn(doAutoFarm)
-    else
-        ToggleButton.Text = "OFF"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    end
+-- Currency sources are local-player Value objects or attributes. Never sum wallets.
+local function readSource(source)
+    if not source or not source.object or (source.object ~= player and not source.object:IsDescendantOf(player)) then return nil end
+    local ok, value = pcall(function()
+        if source.attribute then return source.object:GetAttribute(source.attribute) end
+        return source.object.Value
+    end)
+    return ok and number(value) or nil
 end
-ToggleButton.MouseButton1Click:Connect(handleToggle)
-
-local dragging, dragInput, dragStart, startPos
-
-Frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = Frame.Position
-        
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then 
-                dragging = false 
-            end
+local function acceptBalance(value)
+    if not state.alive or state.disconnected or value == nil then return end
+    if state.balance ~= nil then
+        local delta = value - state.balance
+        if delta > 0 then state.earned = state.earned + delta
+        elseif delta < 0 then state.spent = state.spent - delta end
+    else state.initial = state.initial or value end
+    state.balance = value
+    state.moneyStatus = "Tracking " .. (state.sourceKey or "selected source")
+    if checkTarget then checkTarget() end
+end
+local function bindSource(source, userChange)
+    if state.moneyConnection then state.moneyConnection:Disconnect(); state.moneyConnection = nil end
+    local changed = source and state.sourceKey and state.sourceKey ~= source.key
+    state.source = source
+    state.balance = nil -- Rebinding must not count a replicated replacement as income.
+    if source then
+        state.sourceKey = source.key
+        state.balance = readSource(source)
+        if userChange and changed then resetAccounting(); notify("Currency changed", "Session counters reset for the new currency.") end
+        state.initial = state.initial or state.balance
+        local signal = source.attribute and source.object:GetAttributeChangedSignal(source.attribute)
+            or source.object:GetPropertyChangedSignal("Value")
+        state.moneyConnection = signal:Connect(function()
+            local value = readSource(source)
+            if value == nil then state.balance = nil; state.moneyStatus = "Money source unavailable; tracking paused"; pauseForMissingMoney()
+            else acceptBalance(value) end
         end)
+        state.moneyStatus = state.balance ~= nil and ("Tracking " .. source.key) or "Waiting for a numeric balance"
+    else
+        state.moneyStatus = state.sourceKey and "Selected money source missing; waiting" or "Choose a money source below"
+        pauseForMissingMoney()
     end
-end)
+end
+refreshSources = function()
+    local found, keys = {}, {}
+    local function add(object, attribute, label, name)
+        local source = {object = object, attribute = attribute, key = label, name = string.lower(name)}
+        if readSource(source) ~= nil and not found[label] then found[label] = source; table.insert(keys, label) end
+    end
+    local objects = {player}
+    for _, object in ipairs(player:GetDescendants()) do table.insert(objects, object) end
+    for _, object in ipairs(objects) do
+        local path, cursor = {}, object
+        while cursor and cursor ~= player do table.insert(path, 1, cursor.Name); cursor = cursor.Parent end
+        local label = #path > 0 and table.concat(path, "/") or "Player"
+        if object:IsA("IntValue") or object:IsA("NumberValue") or object:IsA("StringValue") then add(object, nil, label, object.Name) end
+        for attribute, value in pairs(object:GetAttributes()) do
+            local lower = string.lower(attribute)
+            if number(value) ~= nil and (lower == "money" or lower == "cash" or object == player) then
+                add(object, attribute, label .. "/@" .. attribute, attribute)
+            end
+        end
+    end
+    table.sort(keys)
+    state.sources = found
+    local inventory = table.concat(keys, "\0")
+    if sourceDropdown and inventory ~= state.sourceInventory then
+        syncingSource = true; sourceDropdown:Refresh(keys); syncingSource = false
+        state.sourceInventory = inventory
+    end
+    local selected = state.sourceKey and found[state.sourceKey]
+    if not state.sourceKey then
+        local candidates = {}
+        for _, key in ipairs(keys) do
+            if found[key].name == "money" or found[key].name == "cash" then table.insert(candidates, found[key]) end
+        end
+        if #candidates == 1 then selected = candidates[1] end
+        if #candidates > 1 then state.moneyStatus = "Multiple Money / Cash sources found; choose one" end
+    end
+    if selected then
+        if not state.source or selected.object ~= state.source.object or selected.attribute ~= state.source.attribute then bindSource(selected, false) end
+    elseif state.source then bindSource(nil, false) end
+    if sourceDropdown and state.sourceKey and found[state.sourceKey] and sourceDropdown.Value ~= state.sourceKey then
+        syncingSource = true; sourceDropdown:Select(state.sourceKey); syncingSource = false
+    end
+end
 
-Frame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
+-- Optional Discord reports: bounded queue, no mentions, no URLs in logs or files.
+local requestHTTP = request or http_request or (syn and syn.request) or (http and http.request)
+local reportQueue, reporting = {}, false
+local reportGeneration = 0
+local lastManualReport = -math.huge
+local function validWebhook(url)
+    return type(url) == "string" and url:match("^https://discord%.com/api/webhooks/%d+/[%w_%-]+$") ~= nil
+end
+local function reportPayload(reason)
+    local seconds = elapsed()
+    local fields = {
+        {name = "Playtime", value = duration(seconds), inline = false},
+        {name = "Money earned", value = amount(state.earned), inline = true},
+        {name = "Spent / decreases", value = amount(state.spent), inline = true},
+        {name = "Net change", value = amount(state.earned - state.spent), inline = true},
+        {name = "Balance", value = amount(state.balance), inline = true},
+        {name = "Earnings / hour", value = seconds > 0 and amount(state.earned * 3600 / seconds) or "0", inline = true},
+        {name = "Confirmed deliveries", value = tostring(state.deliveries), inline = true},
+        {name = "Target", value = options.target > 0 and (amount(state.earned) .. " / " .. amount(options.target)) or "Disabled", inline = false},
+        {name = "Tracking", value = state.moneyStatus:sub(1, 1000), inline = false},
+    }
+    if options.includePlayer then table.insert(fields, {name = "Player", value = player.Name, inline = true}) end
+    return {username = "Eagle Nation", allowed_mentions = {parse = {}}, embeds = {{
+        title = "Eagle Nation | " .. reason, color = 5763719, fields = fields,
+        footer = {text = "Observed balance changes; may include income outside farming."},
+    }}}
+end
+local function drainReports()
+    if reporting then return end
+    reporting = true
+    task.spawn(function()
+        while #reportQueue > 0 do
+            local job = table.remove(reportQueue, 1)
+            state.webhookStatus = "Sending " .. job.reason
+            local delivered = false
+            for attempt = 1, 2 do
+                if job.generation ~= reportGeneration then break end
+                local ok, response = pcall(function()
+                    return requestHTTP({Url = job.url .. "?wait=true", Method = "POST",
+                        Headers = {["Content-Type"] = "application/json"},
+                        Body = HttpService:JSONEncode(job.payload), Timeout = 15})
+                end)
+                local code = ok and type(response) == "table" and tonumber(response.StatusCode or response.Status) or nil
+                if code and code >= 200 and code < 300 then delivered = true; break end
+                if code == 429 and attempt == 1 then
+                    local delay = 5
+                    local decoded, body = pcall(function() return HttpService:JSONDecode(response.Body or "") end)
+                    if decoded and type(body) == "table" then delay = number(body.retry_after) or delay end
+                    if delay > 60 then state.webhookStatus = "Rate limited; try later"; break end
+                    state.webhookStatus = "Rate limited; retrying once"
+                    task.wait(math.clamp(delay, 1, 60))
+                else
+                    state.webhookStatus = code and ("Failed: HTTP " .. code) or "Failed: request unavailable / network error"
+                    break
+                end
+            end
+            if delivered then state.webhookStatus = "Sent: " .. job.reason end
+        end
+        reporting = false
+    end)
+end
+sendReport = function(reason, manual)
+    if not options.reports then if manual then notify("Reports disabled", "Enable webhook reports first.") end; return false end
+    if not validWebhook(options.webhook) or type(requestHTTP) ~= "function" then
+        state.webhookStatus = "Enter a Discord webhook; executor HTTP support is required"
+        if manual then notify("Report unavailable", state.webhookStatus) end
+        return false
     end
-end)
+    if manual and os.clock() - lastManualReport < 10 then notify("Please wait", "Manual reports have a 10 second cooldown."); return false end
+    if #reportQueue >= 6 then state.webhookStatus = "Report queue full"; return false end
+    if manual then lastManualReport = os.clock() end
+    table.insert(reportQueue, {url = options.webhook, reason = reason, payload = reportPayload(reason), generation = reportGeneration})
+    drainReports()
+    return true
+end
 
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+setRunning = function(enabled, reason)
+    if enabled and (not state.alive or state.disconnected) then enabled = false; reason = "Session ended" end
+    if enabled and options.target > 0 and options.stopAtTarget and state.balance == nil then
+        enabled = false; reason = "Choose an available money source before using an earnings target"
     end
+    if enabled and options.target > 0 and options.stopAtTarget and state.earned >= options.target then
+        enabled = false; reason = "Target already reached; raise it or reset the session"
+    end
+    state.generation = state.generation + 1
+    state.running = enabled
+    state.status = reason or (enabled and "Starting" or "Stopped")
+    if enabled then state.failures = 0 else releasePrompt() end
+    if farmToggle then farmToggle:Set(enabled, false) end
+end
+checkTarget = function()
+    if options.target <= 0 or state.earned < options.target then return end
+    if options.stopAtTarget and state.running then setRunning(false, "Earnings target reached") end
+    if state.targetReached then return end
+    state.targetReached = true
+    notify("Target reached", "Earned " .. amount(state.earned) .. " this session.")
+    if options.targetReport then sendReport("Target reached", false) end
+end
+
+local horsePoints = {
+    CFrame.new(13350.96, 149.11, 2962.43), CFrame.new(13339.26, 149.11, 2953.07),
+    CFrame.new(13326.39, 149.11, 2941.42), CFrame.new(13315.99, 149.11, 2958.62),
+}
+local wheatPoint = CFrame.new(13382.58, 149.05, 2984.82)
+local function validRun(token, character)
+    if not state.alive or not state.running or state.disconnected or state.generation ~= token then return false end
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        return player.Character == character and character.Parent ~= nil and humanoid ~= nil and humanoid.Health > 0
+    end
+    return true
+end
+local function pause(seconds, token, character)
+    local deadline = os.clock() + seconds
+    repeat
+        if not validRun(token, character) then return false end
+        if os.clock() >= deadline then return true end
+        task.wait(math.min(0.1, math.max(0.01, deadline - os.clock())))
+    until false
+end
+local function positionOf(object)
+    if not object then return nil end
+    if object:IsA("Attachment") then return object.WorldPosition end
+    if object:IsA("BasePart") then return object.Position end
+    if object:IsA("Model") then return object:GetPivot().Position end
+    return nil
+end
+local function delivery()
+    local folder = Workspace:FindFirstChild("ActiveDeliveries")
+    return folder and folder:FindFirstChild(player.Name .. "_Delivery")
+end
+local function holdPrompt(prompt, token, character, root)
+    if not validRun(token, character) or not prompt:IsDescendantOf(Workspace) or not prompt.Enabled then return false end
+    local position = positionOf(prompt.Parent)
+    if not position or (root.Position - position).Magnitude > prompt.MaxActivationDistance then return false end
+    activePrompt = prompt
+    local ok = pcall(function() prompt:InputHoldBegin() end)
+    if not ok then releasePrompt(); return false end
+    local completed = pause(math.max(0, prompt.HoldDuration) + 0.15, token, character)
+    releasePrompt()
+    return completed and validRun(token, character)
+end
+local function confirm(token, character, predicate)
+    local deadline = os.clock() + options.confirmation
+    repeat
+        if not validRun(token, character) then return false end
+        if predicate() then return true end
+        if not pause(0.1, token, character) then return false end
+    until os.clock() >= deadline
+    return false
+end
+local function farmStep(token)
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root or not validRun(token, character) then state.status = "Waiting for a living character"; pause(0.5, token); return nil end
+    if options.target > 0 and options.stopAtTarget and state.balance == nil then
+        setRunning(false, "Money tracking unavailable; target protection paused farming"); return nil
+    end
+    local item = delivery()
+    local sites = Workspace:FindFirstChild("PackageSites")
+    local gather = sites and sites:FindFirstChild("GatherPackageHay")
+    local target = item or gather
+    if not target then
+        local points = Workspace:FindFirstChild("TeleportPoints")
+        local ranch = points and points:FindFirstChild("TeleportRanch")
+        local position = positionOf(ranch)
+        if position then
+            state.status = "Traveling to ranch"
+            root.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
+            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            if confirm(token, character, function()
+                local current = Workspace:FindFirstChild("PackageSites")
+                return current and current:FindFirstChild("GatherPackageHay") ~= nil
+            end) then return nil end
+        end
+        return false, "Ranch / hay site unavailable"
+    end
+    local prompt = target:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if not prompt or not prompt.Enabled then return false, "Waiting for an enabled job prompt" end
+    local position = positionOf(prompt.Parent)
+    if not position then return false, "Prompt location unavailable" end
+    local destination = wheatPoint
+    if item then
+        local closest = math.huge
+        for _, point in ipairs(horsePoints) do
+            local distance = (point.Position - position).Magnitude
+            if distance < closest then closest = distance; destination = point end
+        end
+    end
+    -- Preserve known alignment, but adapt if the prompt has moved out of reach.
+    if (destination.Position - position).Magnitude > prompt.MaxActivationDistance * 0.8 then
+        destination = CFrame.new(position + Vector3.new(0, math.min(2, prompt.MaxActivationDistance * 0.25), 0))
+    end
+    state.status = item and "Delivering hay" or "Collecting hay"
+    root.CFrame = destination
+    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    if not pause(options.settle, token, character) then return nil end
+    if not holdPrompt(prompt, token, character, root) then return false, "Prompt failed or out of reach" end
+    local success = confirm(token, character, function()
+        local current = delivery()
+        return (item ~= nil and current ~= item) or (item == nil and current ~= nil)
+    end)
+    if not validRun(token, character) then return nil end
+    if not success then return false, "Job state did not confirm; retrying" end
+    if item then state.deliveries = state.deliveries + 1 end
+    return true
+end
+
+local function disconnected()
+    if not state.alive or state.disconnected then return end
+    state.disconnected, state.ended = true, os.clock()
+    setRunning(false, "Disconnected")
+    if options.disconnectReport then sendReport("Disconnected", false) end
+end
+local function cleanup(reason, fromWindow)
+    if not state.alive then return end
+    state.ended = state.ended or os.clock()
+    setRunning(false, reason or "Session ended")
+    if not state.disconnected then sendReport(reason or "Session ended", false) end
+    state.alive = false
+    if state.moneyConnection then state.moneyConnection:Disconnect(); state.moneyConnection = nil end
+    for _, connection in ipairs(connections) do connection:Disconnect() end
+    for _, thread in ipairs(threads) do if thread ~= coroutine.running() then pcall(task.cancel, thread) end end
+    options.webhook = "" -- An already queued report retains only its temporary copy.
+    if environment.EagleNation == Hub then environment.EagleNation = nil end
+    if Window and not fromWindow then pcall(function() Window:Destroy() end) end
+end
+Hub.Unload = cleanup
+
+-- Transactional construction: failure leaves no running automation.
+local built = pcall(function()
+    local viewport = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+    local width = math.max(260, math.min(640, viewport.X - 28))
+    local height = math.max(220, math.min(540, viewport.Y - 60))
+    Window = WindUI:CreateWindow({
+        Title = "Eagle Nation", Author = "Session Manager", Icon = "bird", Theme = "Dark",
+        Size = UDim2.fromOffset(width, height), MinSize = Vector2.new(math.min(width, 360), math.min(height, 320)),
+        MaxSize = Vector2.new(1000, 800), AutoScale = false, NewElements = true,
+        Resizable = true, ScrollBarEnabled = true, HideSearchBar = false,
+        SideBarWidth = InputService.TouchEnabled and 130 or 180, ToggleKey = Enum.KeyCode.RightShift,
+        OpenButton = {Title = "Eagle Nation", Enabled = true, Draggable = true, Scale = 1},
+    })
+    Window:OnDestroy(function() cleanup("Session ended", true) end)
+    local main = Window:Section({Title = "Eagle Nation", Opened = true})
+    local sessionTab = main:Tab({Title = "Session", Icon = "chart-no-axes-combined"})
+    local farmTab = main:Tab({Title = "Farming", Icon = "wheat"})
+    local moneyTab = main:Tab({Title = "Money", Icon = "wallet"})
+    local webhookTab = main:Tab({Title = "Reports", Icon = "webhook"})
+    dashboard = sessionTab:Paragraph({Title = "Live session", Desc = "Starting session counters..."})
+    sessionTab:Paragraph({Title = "How earnings work", Desc = "Earned = all positive changes in the selected balance. Spending is tracked separately. Transfers and other income may count. Playtime starts when this script loads."})
+    sessionTab:Input({Title = "Earnings target", Desc = "Session income to earn before stopping. 0 disables the target.", Value = "0", Callback = function(value)
+        local target = number(value)
+        if not target or target < 0 or target > 1e15 then notify("Invalid target", "Enter a number from 0 to 1,000,000,000,000,000."); return end
+        if options.target ~= target then options.target = target; state.targetReached = false end
+        checkTarget()
+        if state.running and options.stopAtTarget and target > 0 and state.balance == nil then setRunning(false, "Choose a money source for the target") end
+    end})
+    sessionTab:Toggle({Title = "Stop at target", Value = true, Callback = function(value)
+        options.stopAtTarget = value; checkTarget()
+        if value and options.target > 0 and state.running and state.balance == nil then setRunning(false, "Choose a money source for the target") end
+    end})
+    sessionTab:Button({Title = "Reset session counters", Desc = "Stops farming and starts a new earnings and playtime session.", Callback = function()
+        if not state.disconnected then setRunning(false, "Session reset"); resetAccounting() end
+    end})
+    farmToggle = farmTab:Toggle({Title = "Auto farm", Value = false, Callback = function(value) setRunning(value) end})
+    farmTab:Button({Title = "Stop now", Callback = function() setRunning(false, "Stopped manually") end})
+    farmTab:Slider({Title = "Arrival wait (seconds)", Step = 0.1, Value = {Min = 0.5, Max = 5, Default = 1.5}, Callback = function(value) options.settle = value end})
+    farmTab:Slider({Title = "Confirmation timeout (seconds)", Step = 1, Value = {Min = 3, Max = 20, Default = 8}, Callback = function(value) options.confirmation = value end})
+    farmTab:Slider({Title = "Stop after failed attempts", Step = 1, Value = {Min = 1, Max = 10, Default = 3}, Callback = function(value) options.maxFailures = value end})
+    afkToggle = farmTab:Toggle({Title = "Anti-AFK", Desc = "Optional idle input; does not disable other scripts' connections.", Value = false, Callback = function(value) options.antiAFK = value end})
+    farmTab:Paragraph({Title = "Controls", Desc = "RightShift opens or closes the window. On touch devices, use the draggable Eagle Nation opener. Farming stays off until you enable it."})
+    sourceInfo = moneyTab:Paragraph({Title = "Money tracking", Desc = "Searching..."})
+    sourceDropdown = moneyTab:Dropdown({Title = "Money source", Values = {}, Multi = false, AllowNone = true, SearchBarEnabled = true, Callback = function(value)
+        if syncingSource or state.disconnected then return end
+        local source = state.sources[value]
+        if source and (not state.source or source.object ~= state.source.object or source.attribute ~= state.source.attribute) then
+            setRunning(false, "Money source selected"); bindSource(source, true)
+        end
+    end})
+    moneyTab:Button({Title = "Refresh money sources", Callback = function() if not state.disconnected then refreshSources() end end})
+    moneyTab:Paragraph({Title = "Selecting a balance", Desc = "One Money or Cash source is selected automatically. If both exist, choose the wallet you earn into. Changing currency resets counters. Missing sources pause tracking; reappearing sources are rebased without counting a false reward."})
+    reportInfo = webhookTab:Paragraph({Title = "Report status", Desc = "Not configured"})
+    local webhookInput, clearingInput
+    webhookInput = webhookTab:Input({Title = "Discord webhook URL", Desc = "Paste and press Enter. The field clears after saving; URL stays in memory only.", Value = "", Placeholder = "https://discord.com/api/webhooks/...", Callback = function(value)
+        if clearingInput or value == "" then return end
+        local url = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+        if validWebhook(url) then
+            reportGeneration = reportGeneration + 1; table.clear(reportQueue)
+            options.webhook = url; state.webhookStatus = "URL configured; enable reports when ready"
+        else state.webhookStatus = "Invalid Discord webhook URL"; notify("Invalid webhook", "Use https://discord.com/api/webhooks/ID/TOKEN") end
+        if webhookInput then clearingInput = true; webhookInput:Set(""); clearingInput = false end
+    end})
+    reportsToggle = webhookTab:Toggle({Title = "Enable webhook reports", Value = false, Callback = function(value)
+        options.reports = value; state.lastReport = os.clock()
+        if not value then reportGeneration = reportGeneration + 1; table.clear(reportQueue); state.webhookStatus = "Reports disabled" end
+    end})
+    webhookTab:Toggle({Title = "Periodic session reports", Value = true, Callback = function(value) options.periodic = value end})
+    webhookTab:Slider({Title = "Report interval (minutes)", Step = 1, Value = {Min = 1, Max = 60, Default = 5}, Callback = function(value) options.interval = value * 60 end})
+    webhookTab:Toggle({Title = "Disconnect notification", Value = true, Callback = function(value) options.disconnectReport = value end})
+    webhookTab:Toggle({Title = "Target reached report", Value = true, Callback = function(value) options.targetReport = value end})
+    webhookTab:Toggle({Title = "Include player name", Value = false, Callback = function(value) options.includePlayer = value end})
+    webhookTab:Button({Title = "Send session report now", Callback = function() sendReport("Manual session report", true) end})
+    webhookTab:Button({Title = "Clear webhook URL", Callback = function()
+        reportGeneration = reportGeneration + 1
+        options.webhook = ""; options.reports = false; table.clear(reportQueue); reportsToggle:Set(false, false)
+        state.webhookStatus = "URL cleared; reports disabled"
+    end})
+    webhookTab:Paragraph({Title = "Disconnect limitations", Desc = "Best-effort report when Roblox exposes a disconnect event. A crash, closed client, or full internet outage prevents delivery. Periodic reports preserve the latest successful snapshot. Unloading sends a final report when reports are enabled."})
+    sessionTab:Button({Title = "Unload Eagle Nation", Desc = "End this session, stop farming, and disconnect all script listeners.", Callback = function() cleanup("Session ended") end})
+    sessionTab:Select()
 end)
+if not built then
+    options.reports = false
+    cleanup("UI initialization failed")
+    for _, name in ipairs({"ScreenGui", "NotificationGui", "DropdownGui", "TooltipGui"}) do pcall(function() WindUI[name]:Destroy() end) end
+    warn("[Eagle Nation] UI initialization failed; no features started.")
+    return
+end
+
+local function startup()
+    refreshSources()
+    -- Capability-gated: this signal is restricted on some clients/executors.
+    local disconnectOK = pcall(function()
+        track(GuiService.ErrorMessageChanged:Connect(function(message)
+            if type(message) == "string" and message ~= "" then disconnected() end
+        end))
+    end)
+    state.disconnectStatus = disconnectOK and "Disconnect listener available (best effort)" or "Disconnect signal unavailable on this client"
+    track(player.Idled:Connect(function()
+        if not state.alive or state.disconnected or not options.antiAFK then return end
+        local ok = pcall(function()
+            local virtualUser = game:GetService("VirtualUser")
+            virtualUser:CaptureController(); virtualUser:ClickButton2(Vector2.new())
+        end)
+        if not ok then options.antiAFK = false; afkToggle:Set(false, false); notify("Anti-AFK unavailable", "Idle input failed; anti-AFK has been disabled.") end
+    end))
+    track(player.CharacterRemoving:Connect(function()
+        state.generation = state.generation + 1; releasePrompt()
+        if state.running then state.status = "Waiting for respawn" end
+    end))
+    -- Exactly one worker. ON/OFF invalidates a generation instead of spawning loops.
+    table.insert(threads, task.spawn(function()
+        while state.alive do
+            if state.running and not state.disconnected then
+                local token = state.generation
+                local ok, result, reason = pcall(farmStep, token)
+                releasePrompt()
+                if validRun(token) then
+                    if not ok or result == false then
+                        state.failures = state.failures + 1
+                        state.status = ok and (reason or "Attempt failed") or "Farm error; retrying"
+                        if state.failures >= options.maxFailures then
+                            setRunning(false, "Stopped after " .. state.failures .. " failed attempts")
+                            notify("Farming paused", reason or "Repeated farm errors. Check job objects and character, then restart.")
+                        else pause(1, token) end
+                    elseif result == true then state.failures = 0 end
+                end
+            end
+            task.wait(0.1)
+        end
+    end))
+    table.insert(threads, task.spawn(function()
+        local lastScan = os.clock()
+        while state.alive do
+            if not state.disconnected then
+                if os.clock() - lastScan >= 5 then refreshSources(); lastScan = os.clock() end
+                if state.source then
+                    local balance = readSource(state.source)
+                    if balance ~= nil then acceptBalance(balance)
+                    else state.balance = nil; state.moneyStatus = "Money source unavailable; tracking paused"; pauseForMissingMoney() end
+                end
+                checkTarget()
+                if options.reports and options.periodic and os.clock() - state.lastReport >= options.interval then
+                    state.lastReport = os.clock(); sendReport("Session update", false)
+                end
+            end
+            local seconds = elapsed()
+            local target = options.target > 0 and (amount(state.earned) .. " / " .. amount(options.target) .. " (" .. string.format("%.1f", math.min(100, state.earned / options.target * 100)) .. "%)") or "Disabled"
+            updateParagraph(dashboard, table.concat({
+                "Status: " .. state.status, "Playtime: " .. duration(seconds),
+                "Earned: " .. amount(state.earned) .. "  |  Spent: " .. amount(state.spent),
+                "Net: " .. amount(state.earned - state.spent) .. "  |  Balance: " .. amount(state.balance),
+                "Earnings / hour: " .. amount(seconds > 0 and state.earned * 3600 / seconds or 0),
+                "Target: " .. target, "Confirmed deliveries: " .. state.deliveries .. "  |  Failed attempts: " .. state.failures,
+            }, "\n"))
+            updateParagraph(sourceInfo, state.moneyStatus .. "\nCurrent balance: " .. amount(state.balance))
+            updateParagraph(reportInfo, state.webhookStatus .. "\nReports: " .. (options.reports and "Enabled" or "Disabled") .. "\n" .. state.disconnectStatus)
+            task.wait(1)
+        end
+    end))
+end
+local started = pcall(startup)
+if not started then cleanup("Startup failed"); warn("[Eagle Nation] Startup failed; all features stopped.") end
