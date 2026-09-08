@@ -1,906 +1,187 @@
--- FLOW STUDIO V1.9 | Developer: Theo | Hub: Flow Hub
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
-local Svc = {
-    Players          = game:GetService("Players"),
-    RunService       = game:GetService("RunService"),
-    HttpService      = game:GetService("HttpService"),
-    TeleportService  = game:GetService("TeleportService"),
-    VirtualUser      = game:GetService("VirtualUser"),
-    Workspace        = game:GetService("Workspace"),
-    CoreGui          = game:GetService("CoreGui"),
-    GuiService       = game:GetService("GuiService"),
-    TweenService     = game:GetService("TweenService"),
-    UserInputService = game:GetService("UserInputService"),
-    Lighting         = game:GetService("Lighting"),
-}
+local player = Players.LocalPlayer
+local autoFarmAktif = false
 
-local LP = Svc.Players.LocalPlayer
-local TW = Svc.TweenService
+local task_wait = task and task.wait or wait
+local task_spawn = task and task.spawn or function(f) coroutine.resume(coroutine.create(f)) end
 
-local reqFunc
-do
-    local c = {}
-    if syn  and type(syn.request)    == "function" then c[#c+1] = syn.request    end
-    if http and type(http.request)   == "function" then c[#c+1] = http.request   end
-    if      type(http_request)       == "function" then c[#c+1] = http_request   end
-    if      type(request)            == "function" then c[#c+1] = request        end
-    reqFunc = c[1]
-end
-
-local Cfg = {
-    AutoFarm = false, Job = "Haybales",
-    AutoReconnect = true, AutoRefuel = false, AntiAFK = true,
-    WalkBoost = false, WalkSpeed = 50,
-    JumpBoost = false, JumpPower = 80,
-    Noclip = false, Fly = false, FlySpeed = 50,
-    GodMode = false, ESP = false,
-    PerfMode = false, FPSCap = "60",
-    StreamerMode = false,
-    AutoExecURL = "", WebhookURL = "", DiscordID = "",
-}
-
-local Ses = {
-    StartMoney = 0, CurrentProfit = 0,
-    StartTime = os.time(), Logs = {},
-    LastWebhook = 0, FarmActive = false,
-}
-
-local Farm = { VH = {}, VM = {} }
-
--- ─────────────────────────────────────────
---  COORDINATES
--- ─────────────────────────────────────────
-local TPos = {
-    JobHorse   = Vector3.new(13377.90, 149.05,  2997.01),
-    JobConst   = Vector3.new(29274.67, 195.81, -2377.38),
-    HaySupply  = Vector3.new(13380.60, 149.04,  2985.09),
-    CemSupply  = Vector3.new(29264.86, 195.81, -2377.06),
-    GasStation = Vector3.new(-643.71,    8.09,    10.98),
-}
-local Targets = {
-    Horses = {
-        Vector3.new(13313.27, 149.11, 2958.99),
-        Vector3.new(13328.10, 149.11, 2942.50),
-        Vector3.new(13339.88, 149.11, 2951.84),
-        Vector3.new(13352.23, 149.11, 2961.71),
-    },
-    Mixers = {
-        Vector3.new(29250.05, 195.45, -2345.13),
-        Vector3.new(29246.88, 195.28, -2328.42),
-        Vector3.new(29244.01, 195.17, -2311.22),
-        Vector3.new(29239.97, 194.90, -2295.04),
-        Vector3.new(29285.82, 194.75, -2284.93),
-        Vector3.new(29289.38, 195.01, -2301.54),
-        Vector3.new(29292.69, 195.22, -2318.36),
-        Vector3.new(29297.62, 195.69, -2334.45),
-    },
-}
-
--- ─────────────────────────────────────────
---  UTILITIES
--- ─────────────────────────────────────────
-local function addLog(msg)
-    table.insert(Ses.Logs, 1, ("[%s] %s"):format(os.date("%X"), msg))
-    if #Ses.Logs > 14 then table.remove(Ses.Logs) end
-end
-
-local function getRoot() return LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") end
-local function getHum()  return LP.Character and LP.Character:FindFirstChild("Humanoid") end
-
-local function findItem(names)
-    for _, name in ipairs(names) do
-        local low = name:lower()
-        if LP.Backpack:FindFirstChild(name) then return true end
-        if LP.Character and LP.Character:FindFirstChild(name) then return true end
-        for _, o in ipairs(LP.Backpack:GetChildren()) do
-            if o:IsA("Tool") and o.Name:lower():find(low, 1, true) then return true end
+local success, err = pcall(function()
+    if getconnections then
+        for _, connection in pairs(getconnections(player.Idled)) do
+            connection:Disable()
         end
-        if LP.Character then
-            for _, o in ipairs(LP.Character:GetChildren()) do
-                if o:IsA("Tool") and o.Name:lower():find(low, 1, true) then return true end
-            end
-        end
-    end
-    return false
-end
-
-local function fastTP(pos)
-    local root = getRoot()
-    if not root then return false end
-    pcall(function()
-        root.CFrame = CFrame.new(pos + Vector3.new(0, 3.5, 0))
-        root.AssemblyLinearVelocity = Vector3.zero
-    end)
-    task.wait(0.05)
-    return true
-end
-
-local function fireNearby(keywords, holdTime)
-    local root = getRoot()
-    if not root then return false end
-    local seen = {}
-    for _, part in ipairs(Svc.Workspace:GetPartBoundsInRadius(root.Position, 22)) do
-        local obj = part
-        for _ = 1, 5 do
-            if not obj or obj == Svc.Workspace then break end
-            if not seen[obj] then
-                seen[obj] = true
-                for _, ch in ipairs(obj:GetChildren()) do
-                    if ch:IsA("ProximityPrompt") and ch.Enabled then
-                        local txt = (ch.ActionText .. " " .. ch.ObjectText):lower()
-                        local match = not keywords
-                        if not match then
-                            for _, kw in ipairs(keywords) do
-                                if txt:find(kw, 1, true) then match = true; break end
-                            end
-                        end
-                        if match then
-                            local ok = pcall(function()
-                                if fireproximityprompt then
-                                    if holdTime and holdTime > 0 then
-                                        fireproximityprompt(ch, holdTime)
-                                    else
-                                        fireproximityprompt(ch)
-                                    end
-                                else
-                                    local dur = (holdTime and holdTime > 0) and holdTime or ch.HoldDuration
-                                    if dur > 0 then task.wait(dur + 0.1) end
-                                end
-                            end)
-                            if ok then return true end
-                        end
-                    end
-                end
-            end
-            obj = obj.Parent
-        end
-    end
-    return false
-end
-
--- ─────────────────────────────────────────
---  ANTI-AFK
--- ─────────────────────────────────────────
-Svc.RunService.Heartbeat:Connect(function()
-    if Cfg.AntiAFK then
-        pcall(function()
-            Svc.VirtualUser:CaptureController()
-            Svc.VirtualUser:ClickButton2(Vector2.zero)
-        end)
-    end
-end)
-
--- ─────────────────────────────────────────
---  BOOST
--- ─────────────────────────────────────────
-local function applyBoost(hum)
-    hum = hum or getHum()
-    if not hum then return end
-    pcall(function()
-        hum.WalkSpeed = Cfg.WalkBoost and Cfg.WalkSpeed or 16
-        hum.JumpPower = Cfg.JumpBoost and Cfg.JumpPower or 50
-    end)
-end
-
--- ─────────────────────────────────────────
---  NOCLIP
--- ─────────────────────────────────────────
-local noclipConn
-local function setNoclip(on)
-    Cfg.Noclip = on
-    if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
-    if on then
-        noclipConn = Svc.RunService.Stepped:Connect(function()
-            if LP.Character then
-                for _, p in ipairs(LP.Character:GetDescendants()) do
-                    if p:IsA("BasePart") then pcall(function() p.CanCollide = false end) end
-                end
-            end
-        end)
-    elseif LP.Character then
-        for _, p in ipairs(LP.Character:GetDescendants()) do
-            if p:IsA("BasePart") then pcall(function() p.CanCollide = true end) end
-        end
-    end
-end
-
--- ─────────────────────────────────────────
---  FLY
--- ─────────────────────────────────────────
-local flyConn, flyBV, flyBGyro
-local function setFly(on)
-    Cfg.Fly = on
-    if flyConn then flyConn:Disconnect(); flyConn = nil end
-    local char = LP.Character
-    if not char then return end
-    local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
-    if not root or not hum then return end
-    if flyBV    then pcall(function() flyBV:Destroy()    end); flyBV    = nil end
-    if flyBGyro then pcall(function() flyBGyro:Destroy() end); flyBGyro = nil end
-    if on then
-        hum.PlatformStand = true
-        flyBV = Instance.new("BodyVelocity", root)
-        flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-        flyBV.Velocity = Vector3.zero
-        flyBGyro = Instance.new("BodyGyro", root)
-        flyBGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-        flyBGyro.P = 1e4
-        flyConn = Svc.RunService.RenderStepped:Connect(function()
-            if not Cfg.Fly or not flyBV or not flyBV.Parent then return end
-            local cam = Svc.Workspace.CurrentCamera
-            local UIS = Svc.UserInputService
-            local fwd = (UIS:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
-            local rgt = (UIS:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
-            local up  = (UIS:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0)
-            flyBV.Velocity = (cam.CFrame.LookVector*fwd + cam.CFrame.RightVector*rgt + Vector3.new(0,1,0)*up) * Cfg.FlySpeed
-            flyBGyro.CFrame = cam.CFrame
-        end)
     else
-        hum.PlatformStand = false
-    end
-end
-
--- ─────────────────────────────────────────
---  GOD MODE
--- ─────────────────────────────────────────
-local godConn
-local function setGod(on)
-    Cfg.GodMode = on
-    if godConn then godConn:Disconnect(); godConn = nil end
-    if on then
-        godConn = Svc.RunService.Heartbeat:Connect(function()
-            local h = getHum()
-            if h and h.Health < h.MaxHealth then pcall(function() h.Health = h.MaxHealth end) end
-        end)
-    end
-end
-
--- Satu CharacterAdded untuk semua re-apply
-LP.CharacterAdded:Connect(function(char)
-    local hum = char:WaitForChild("Humanoid", 5)
-    if not hum then return end
-    task.wait(0.5)
-    applyBoost(hum)
-    if Cfg.Fly    then task.wait(0.1); setFly(true)    end
-    if Cfg.Noclip then task.wait(0.1); setNoclip(true) end
-    if Cfg.GodMode then setGod(true) end
-end)
-
--- ─────────────────────────────────────────
---  ESP
--- ─────────────────────────────────────────
-local espConns = {}
-local function clearESP()
-    for _, c in ipairs(espConns) do pcall(function() c:Disconnect() end) end
-    espConns = {}
-    for _, p in ipairs(Svc.Players:GetPlayers()) do
-        if p ~= LP and p.Character then
-            local h = p.Character:FindFirstChild("_FlowESP")
-            if h then h:Destroy() end
-        end
-    end
-end
-local function addESP(p)
-    if p == LP or not p.Character then return end
-    if p.Character:FindFirstChild("_FlowESP") then return end
-    local hl = Instance.new("Highlight", p.Character)
-    hl.Name = "_FlowESP"
-    hl.FillColor = Color3.fromRGB(138, 92, 226)
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.FillTransparency = 0.5
-    hl.OutlineTransparency = 0
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-end
-local function setESP(on)
-    clearESP(); Cfg.ESP = on
-    if not on then return end
-    for _, p in ipairs(Svc.Players:GetPlayers()) do addESP(p) end
-    table.insert(espConns, Svc.Players.PlayerAdded:Connect(function(p)
-        table.insert(espConns, p.CharacterAdded:Connect(function()
-            task.wait(1); if Cfg.ESP then addESP(p) end
-        end))
-    end))
-end
-
--- ─────────────────────────────────────────
---  FPS / PERF
--- ─────────────────────────────────────────
-local function setFPS(cap)
-    Cfg.FPSCap = cap
-    local val = cap == "Unlimited" and math.huge or (tonumber(cap) or 60)
-    if setfpscap then pcall(setfpscap, val)
-    elseif type(settings) == "function" then
-        pcall(function() settings().Rendering.FrameRateManager = Enum.FrameRateManagerMode.Disabled end)
-    end
-end
-
-local function setPerfMode(on)
-    Cfg.PerfMode = on
-    pcall(function()
-        Svc.Lighting.GlobalShadows = not on
-        for _, ef in ipairs(Svc.Lighting:GetChildren()) do
-            if ef:IsA("PostEffect") then ef.Enabled = not on end
-        end
-    end)
-end
-
--- ─────────────────────────────────────────
---  WEBHOOK
--- ─────────────────────────────────────────
-local function SendWebhook(typ, extra)
-    if Cfg.WebhookURL == "" or not reqFunc then return end
-    local isDisc = typ == "Disconnect"
-    if not isDisc then
-        if os.time() - Ses.LastWebhook < 80 then return end
-        Ses.LastWebhook = os.time()
-    end
-    local elapsed = math.max(1, math.floor((os.time() - Ses.StartTime) / 60))
-    local pph = math.floor(Ses.CurrentProfit / elapsed * 60)
-    local tag = isDisc and (Cfg.DiscordID ~= "" and "<@"..Cfg.DiscordID..">" or "@everyone") or nil
-    local embed = isDisc and {
-        title = "🚨 DISCONNECT", color = 0xFF4747,
-        description = "Terputus." .. (Cfg.AutoReconnect and " 🔄 Reconnecting..." or ""),
-        fields = {
-            {name="User",   value="`"..LP.Name.."`",         inline=true},
-            {name="Reason", value="`"..tostring(extra).."`", inline=false},
-            {name="Profit", value="$"..Ses.CurrentProfit,    inline=true},
-            {name="Time",   value=elapsed.."m",              inline=true},
-        },
-    } or {
-        title = "📊 FLOW UPDATE", color = 0x8A5CE2,
-        fields = {
-            {name="User",   value="`"..LP.Name.."`",      inline=true},
-            {name="Profit", value="$"..Ses.CurrentProfit, inline=true},
-            {name="/Jam",   value="~$"..pph,              inline=true},
-            {name="Job",    value=Cfg.Job,                inline=true},
-            {name="Time",   value=elapsed.."m",           inline=true},
-        },
-    }
-    local ok, body = pcall(Svc.HttpService.JSONEncode, Svc.HttpService, {content=tag, embeds={embed}})
-    if ok then
-        pcall(reqFunc, {Url=Cfg.WebhookURL, Method="POST",
-            Headers={["Content-Type"]="application/json"}, Body=body})
-    end
-end
-
--- ─────────────────────────────────────────
---  FARM ENGINE
--- ─────────────────────────────────────────
-local HAY_ITEMS   = {"Wheat","Hay","HayBale","Straw"}
-local CEM_ITEMS   = {"Cement","CementBag","Concrete","Bag"}
-local HAY_PICKUP  = {"wheat","hay","grab","pick","take","straw","bale","supply"}
-local HAY_DELIVER = {"feed","horse","deliver","give","hay","bucket","barn"}
-local CEM_PICKUP  = {"cement","bag","grab","pick","take","concrete","supply","get"}
-local CEM_DELIVER = {"pour","mixer","deliver","dump","fill","concrete","deposit","cement","add"}
-
-local function smartDeliver(targets, visited, itemNames, keywords)
-    for i, pos in ipairs(targets) do
-        if not Cfg.AutoFarm then return "stop" end
-        if not visited[i] then
-            fastTP(pos)
-            task.wait(0.08)
-            visited[i] = true
-            if fireNearby(keywords) then
-                task.wait(0.25)
-                if not findItem(itemNames) then
-                    addLog("✅ #"..i.." deliver sukses!")
-                    return "ok"
-                end
-                addLog("⚠️ #"..i.." penuh, next...")
-            end
-        end
-    end
-    for i = 1, #targets do
-        if not visited[i] then return "notDone" end
-    end
-    return "allDone"
-end
-
-local function runFarm()
-    if Ses.FarmActive then return end
-    Ses.FarmActive = true
-    Farm.VH, Farm.VM = {}, {}
-    addLog("▶ Farm: " .. Cfg.Job)
-
-    while Cfg.AutoFarm do
-        if not getRoot() then task.wait(1) else
-
-        if Cfg.AutoRefuel then
-            local hum = getHum()
-            if hum and hum.SeatPart then
-                local veh = hum.SeatPart.Parent
-                local fuel = veh and (veh:FindFirstChild("Fuel") or veh:FindFirstChild("Gas"))
-                if fuel and fuel.Value < 20 then
-                    addLog("⛽ Refuel...")
-                    if veh.PrimaryPart then
-                        pcall(function() veh:SetPrimaryPartCFrame(CFrame.new(TPos.GasStation + Vector3.new(0,2,0))) end)
-                    else fastTP(TPos.GasStation) end
-                    task.wait(1); fireNearby({"fill","refuel","gas","pump"}, 5)
-                end
-            end
-        end
-
-        if Cfg.Job == "Haybales" then
-            if not findItem(HAY_ITEMS) then
-                fastTP(TPos.HaySupply); task.wait(0.08)
-                fireNearby(HAY_PICKUP); task.wait(0.3)
-                if findItem(HAY_ITEMS) then
-                    Farm.VH = {}; addLog("🌾 Hay diambil")
-                else
-                    addLog("⚠️ Gagal ambil hay"); task.wait(0.5)
-                end
-            else
-                local res = smartDeliver(Targets.Horses, Farm.VH, HAY_ITEMS, HAY_DELIVER)
-                if res == "ok" then Farm.VH = {}
-                elseif res == "allDone" then addLog("🔄 Semua kuda kenyang, 3s"); Farm.VH = {}; task.wait(3)
-                elseif res == "stop" then break end
-            end
-
-        elseif Cfg.Job == "Construction" then
-            if not findItem(CEM_ITEMS) then
-                fastTP(TPos.CemSupply); task.wait(0.08)
-                fireNearby(CEM_PICKUP); task.wait(0.3)
-                if findItem(CEM_ITEMS) then
-                    Farm.VM = {}; addLog("🧱 Semen diambil")
-                else
-                    addLog("⚠️ Gagal ambil semen"); task.wait(0.5)
-                end
-            else
-                local res = smartDeliver(Targets.Mixers, Farm.VM, CEM_ITEMS, CEM_DELIVER)
-                if res == "ok" then Farm.VM = {}
-                elseif res == "allDone" then addLog("🔄 Semua mixer penuh, 3s"); Farm.VM = {}; task.wait(3)
-                elseif res == "stop" then break end
-            end
-        end
-
-        SendWebhook("Update")
-        task.wait(0.02)
-        end
-    end
-
-    Ses.FarmActive = false
-    addLog("⏹ Farm berhenti")
-end
-
--- ─────────────────────────────────────────
---  AUTO RECONNECT
--- ─────────────────────────────────────────
-local discFired = false
-local function onDisconnect(reason)
-    if discFired then return end
-    discFired = true
-    addLog("❌ " .. tostring(reason))
-    SendWebhook("Disconnect", reason)
-    if Cfg.AutoExecURL ~= "" and writefile then
-        pcall(writefile, "autoexec/flow_autorun.lua",
-            ('loadstring(game:HttpGet("%s"))()'):format(Cfg.AutoExecURL))
-    end
-    if Cfg.AutoReconnect then
-        task.wait(4)
-        local ok = pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
-        if not ok then
-            pcall(function()
-                Svc.TeleportService:TeleportAsync(game.PlaceId, {LP}, Instance.new("TeleportOptions"))
-            end)
-        end
-    end
-end
-Svc.GuiService:GetPropertyChangedSignal("ErrorMessage"):Connect(function()
-    local m = Svc.GuiService:GetErrorMessage()
-    if m and m ~= "" then onDisconnect(m) end
-end)
-game:BindToClose(function() onDisconnect("Game closing"); task.wait(2) end)
-LP.AncestryChanged:Connect(function(_, p) if not p then onDisconnect("Removed") end end)
-
--- ─────────────────────────────────────────
---  TOGGLE BUTTON (Draggable)
--- ─────────────────────────────────────────
-local TogUI = Instance.new("ScreenGui")
-TogUI.Name = "FlowTog19"
-TogUI.ResetOnSpawn = false
-TogUI.DisplayOrder = 100
-TogUI.Parent = Svc.CoreGui
-
-local Tog = Instance.new("TextButton", TogUI)
-Tog.Size = UDim2.new(0, 115, 0, 42)
-Tog.Position = UDim2.new(0, 12, 0.5, -21)
-Tog.BackgroundColor3 = Color3.fromRGB(20, 16, 30)
-Tog.TextColor3 = Color3.fromRGB(180, 140, 255)
-Tog.Font = Enum.Font.GothamBold
-Tog.Text = "⚡ FLOW"
-Tog.TextSize = 13
-Tog.AutoButtonColor = false
-Instance.new("UICorner", Tog).CornerRadius = UDim.new(0, 12)
-local togStroke = Instance.new("UIStroke", Tog)
-togStroke.Color = Color3.fromRGB(138, 92, 226)
-togStroke.Thickness = 1.5
-
-Tog.MouseEnter:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(32, 24, 50) end)
-Tog.MouseLeave:Connect(function() Tog.BackgroundColor3 = Color3.fromRGB(20, 16, 30) end)
-
-local dragging, dragStart, btnStart
-Tog.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1
-    or inp.UserInputType == Enum.UserInputType.Touch then
-        dragging = true; dragStart = inp.Position; btnStart = Tog.Position
-        inp.Changed:Connect(function()
-            if inp.UserInputState == Enum.UserInputState.End then dragging = false end
+        local VirtualUser = game:GetService("VirtualUser")
+        player.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
         end)
     end
 end)
-Svc.UserInputService.InputChanged:Connect(function(inp)
-    if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
-    or inp.UserInputType == Enum.UserInputType.Touch) then
-        local d = inp.Position - dragStart
-        Tog.Position = UDim2.new(
-            btnStart.X.Scale, btnStart.X.Offset + d.X,
-            btnStart.Y.Scale, btnStart.Y.Offset + d.Y)
-    end
-end)
 
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if Cfg.AutoFarm then
-            Tog.Text = "🟢 FARMING"
-            Tog.TextColor3 = Color3.fromRGB(100, 255, 160)
-            togStroke.Color = Color3.fromRGB(80, 220, 140)
-        else
-            Tog.Text = "⚡ FLOW"
-            Tog.TextColor3 = Color3.fromRGB(180, 140, 255)
-            togStroke.Color = Color3.fromRGB(138, 92, 226)
-        end
-    end
-end)
-
--- ─────────────────────────────────────────
---  FLUENT (blocking, no fake bar needed)
--- ─────────────────────────────────────────
-local Fluent = loadstring(game:HttpGet(
-    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
-))()
-
--- ─────────────────────────────────────────
---  UI
--- ─────────────────────────────────────────
-local Win = Fluent:CreateWindow({
-    Title    = "Flow Studio",
-    SubTitle = "V1.9 Premium",
-    TabWidth = 150,
-    Size     = UDim2.fromOffset(590, 480),
-    Theme    = "Darker",
-})
-
-Tog.MouseButton1Click:Connect(function() pcall(function() Win:Minimize() end) end)
-
-local T = {
-    Auto = Win:AddTab({ Title = "Automation",  Icon = "tractor"  }),
-    TP   = Win:AddTab({ Title = "Teleport",    Icon = "map-pin"  }),
-    Play = Win:AddTab({ Title = "Players",     Icon = "users"    }),
-    Set  = Win:AddTab({ Title = "Settings",    Icon = "settings" }),
-    Perf = Win:AddTab({ Title = "Performance", Icon = "zap"      }),
-    Hook = Win:AddTab({ Title = "Webhook",     Icon = "link"     }),
+local TitikKuda = {
+    CFrame.new(13350.96, 149.11, 2962.43),
+    CFrame.new(13339.26, 149.11, 2953.07),
+    CFrame.new(13326.39, 149.11, 2941.42),
+    CFrame.new(13315.99, 149.11, 2958.62),
 }
 
-task.spawn(function()
-    local ps = LP:WaitForChild("leaderstats", 10)
-    if ps then
-        local m = ps:WaitForChild("Money", 5)
-        if m then Ses.StartMoney = m.Value end
+local TitikWheat = CFrame.new(13382.58, 149.05, 2984.82) 
+
+local function getTitikKudaTerdekat(targetPosition)
+    local jarakTerdekat = math.huge
+    local titikTerbaik = nil
+    
+    for _, titikManual in pairs(TitikKuda) do
+        local jarak = (titikManual.Position - targetPosition).Magnitude
+        if jarak < jarakTerdekat then
+            jarakTerdekat = jarak
+            titikTerbaik = titikManual
+        end
     end
-end)
-
--- ── AUTOMATION ──
-T.Auto:AddDropdown("JobSel", {
-    Title = "Pilih Job", Values = {"Haybales","Construction"}, Default = "Haybales",
-    Callback = function(v) Cfg.Job = v; Farm.VH = {}; Farm.VM = {}; addLog("Job: "..v) end,
-})
-T.Auto:AddToggle("FarmTgl", {
-    Title = "Auto Farm", Default = false,
-    Callback = function(v)
-        Cfg.AutoFarm = v
-        if v then task.spawn(runFarm) end
-        addLog(v and "▶ Farm mulai" or "⏹ Farm stop")
-    end,
-})
-local miniLog = T.Auto:AddParagraph({Title = "Activity Log", Content = "Idle..."})
-
--- ── TELEPORT ──
-T.TP:AddButton({Title = "🌾  Haybales Area",     Callback = function() fastTP(TPos.JobHorse);   addLog("TP: Haybales") end})
-T.TP:AddButton({Title = "🏗️  Construction Area", Callback = function() fastTP(TPos.JobConst);   addLog("TP: Construction") end})
-T.TP:AddButton({Title = "⛽  Gas Station",        Callback = function() fastTP(TPos.GasStation); addLog("TP: Gas Station") end})
-
-T.TP:AddParagraph({Title = "Player Teleport", Content = "Pilih pemain → Teleport."})
-
-local selPlayer = {name = ""}
-local initList = {}
-for _, p in ipairs(Svc.Players:GetPlayers()) do
-    if p ~= LP then initList[#initList+1] = p.Name end
+    
+    return titikTerbaik
 end
-local dropVals    = #initList > 0 and initList or {"(tidak ada pemain)"}
-local dropDefault = #initList > 0 and initList[1] or ""
-if #initList > 0 then selPlayer.name = initList[1] end
 
-T.TP:AddDropdown("PlyrDrop", {
-    Title = "Pilih Pemain", Values = dropVals, Default = dropDefault,
-    Callback = function(v)
-        if v ~= "(tidak ada pemain)" then selPlayer.name = tostring(v) end
-    end,
-})
-T.TP:AddButton({
-    Title = "🔄 Refresh List",
-    Callback = function()
-        local n = 0
-        for _, p in ipairs(Svc.Players:GetPlayers()) do if p ~= LP then n += 1 end end
-        Fluent:Notify({Title="Refresh", Content=n.." pemain ditemukan.", Duration=3})
-        addLog("Refresh: "..n.." pemain")
-    end,
-})
-T.TP:AddButton({
-    Title = "🚀 Teleport ke Pemain",
-    Callback = function()
-        local name = selPlayer.name
-        if name == "" then Fluent:Notify({Title="Error", Content="Pilih pemain dulu.", Duration=3}); return end
-        local tgt
-        for _, p in ipairs(Svc.Players:GetPlayers()) do
-            if p.Name == name then tgt = p; break end
-        end
-        if not tgt then Fluent:Notify({Title="Error", Content=name.." tidak ada.", Duration=3}); return end
-        local tRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-        if tRoot then
-            fastTP(tRoot.Position); addLog("TP → "..name)
-            Fluent:Notify({Title="Teleport", Content="Berhasil TP ke "..name, Duration=3})
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoFarmGUI"
+ScreenGui.ResetOnSpawn = false
+
+local successUI = pcall(function() ScreenGui.Parent = CoreGui end)
+if not successUI then ScreenGui.Parent = player:WaitForChild("PlayerGui") end
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 200, 0, 100)
+Frame.Position = UDim2.new(0.5, -100, 0.1, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Frame.BorderSizePixel = 2
+Frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0.4, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Chudai Hub"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextScaled = true
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = Frame
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Size = UDim2.new(0.8, 0, 0.4, 0)
+ToggleButton.Position = UDim2.new(0.1, 0, 0.5, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ToggleButton.Text = "OFF"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.TextScaled = true
+ToggleButton.Font = Enum.Font.SourceSansBold
+ToggleButton.Parent = Frame
+
+local function holdPrompt(prompt)
+    if not prompt then return end
+    local holdTime = prompt.HoldDuration
+    
+    pcall(function() prompt:InputHoldBegin() end)
+    task_wait(holdTime + 0.15)
+    pcall(function() prompt:InputHoldEnd() end)
+end
+
+local function doAutoFarm()
+    while autoFarmAktif do
+        task_wait(0.1)
+        
+        local character = player.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") then 
+            -- Diubah dari bentuk 'continue' karena Lua 5.1 tidak mengenal kata kunci continue
         else
-            Fluent:Notify({Title="Error", Content="Karakter "..name.." tidak tersedia.", Duration=3})
-        end
-    end,
-})
-T.TP:AddButton({
-    Title = "🌐 Server Hop",
-    Callback = function()
-        addLog("Server hop...")
-        pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
-    end,
-})
+            local rootPart = character.HumanoidRootPart
+            local activeDeliveries = Workspace:FindFirstChild("ActiveDeliveries")
+            local packageSites = Workspace:FindFirstChild("PackageSites")
+            local namaDelivery = player.Name .. "_Delivery"
+            local myDelivery = activeDeliveries and activeDeliveries:FindFirstChild(namaDelivery)
 
--- ── PLAYERS ──
-T.Play:AddToggle("ESPTgl", {
-    Title = "Player ESP", Default = false,
-    Callback = function(v) setESP(v); addLog("ESP: "..(v and "ON" or "OFF")) end,
-})
-local playerInfo = T.Play:AddParagraph({Title = "Players Online", Content = "..."})
-
--- ── SETTINGS ──
-T.Set:AddToggle("WalkTgl", {
-    Title = "WalkSpeed Boost", Default = false,
-    Callback = function(v) Cfg.WalkBoost = v; applyBoost() end,
-})
-T.Set:AddSlider("WalkSldr", {
-    Title = "Walk Speed", Default = 50, Min = 16, Max = 120, Rounding = 0,
-    Callback = function(v) Cfg.WalkSpeed = v; if Cfg.WalkBoost then applyBoost() end end,
-})
-T.Set:AddToggle("JumpTgl", {
-    Title = "JumpPower Boost", Default = false,
-    Callback = function(v) Cfg.JumpBoost = v; applyBoost() end,
-})
-T.Set:AddSlider("JumpSldr", {
-    Title = "Jump Power", Default = 80, Min = 50, Max = 300, Rounding = 0,
-    Callback = function(v) Cfg.JumpPower = v; if Cfg.JumpBoost then applyBoost() end end,
-})
-T.Set:AddToggle("NoclipTgl", {
-    Title = "Noclip", Default = false,
-    Callback = function(v) setNoclip(v) end,
-})
-T.Set:AddToggle("FlyTgl", {
-    Title = "Fly  (WASD + Space / Shift)", Default = false,
-    Callback = function(v) setFly(v) end,
-})
-T.Set:AddSlider("FlySldr", {
-    Title = "Fly Speed", Default = 50, Min = 10, Max = 200, Rounding = 0,
-    Callback = function(v) Cfg.FlySpeed = v end,
-})
-T.Set:AddToggle("GodTgl", {
-    Title = "God Mode", Default = false,
-    Callback = function(v) setGod(v) end,
-})
-T.Set:AddToggle("AntiAFKTgl", {
-    Title = "Anti-AFK", Default = true,
-    Callback = function(v) Cfg.AntiAFK = v end,
-})
-T.Set:AddToggle("RefuelTgl", {
-    Title = "Auto Refuel", Default = false,
-    Callback = function(v) Cfg.AutoRefuel = v end,
-})
-T.Set:AddToggle("ReconTgl", {
-    Title = "Auto Reconnect", Default = true,
-    Callback = function(v) Cfg.AutoReconnect = v end,
-})
-T.Set:AddToggle("StreamTgl", {
-    Title = "Streamer Mode", Default = false,
-    Callback = function(v)
-        Cfg.StreamerMode = v
-        local char = LP.Character
-        if not char then return end
-        pcall(function()
-            local hum = char:FindFirstChild("Humanoid")
-            if hum then
-                hum.DisplayDistanceType = v
-                    and Enum.HumanoidDisplayDistanceType.None
-                    or Enum.HumanoidDisplayDistanceType.Viewer
-            end
-            for _, obj in ipairs(char:GetDescendants()) do
-                pcall(function()
-                    if (obj:IsA("BasePart") or obj:IsA("Decal")) and not obj:FindFirstAncestorOfClass("Tool") then
-                        obj.Transparency = v and 1 or 0
-                    elseif obj:IsA("BillboardGui") or obj:IsA("TextLabel") then
-                        obj.Enabled = not v
+            if myDelivery then
+                local prompt = myDelivery:FindFirstChildOfClass("ProximityPrompt", true)
+                if prompt then
+                    local titikPas = getTitikKudaTerdekat(myDelivery.Position)
+                    if titikPas then
+                        rootPart.CFrame = titikPas
+                        rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                        task_wait(1.5)
+                        holdPrompt(prompt)
+                        task_wait(2)
                     end
-                end)
+                end
+            else
+                local gatherSite = packageSites and packageSites:FindFirstChild("GatherPackageHay")
+                if gatherSite then
+                    local prompt = gatherSite:FindFirstChildOfClass("ProximityPrompt", true)
+                    if prompt then
+                        rootPart.CFrame = TitikWheat
+                        rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                        task_wait(1.5)
+                        holdPrompt(prompt)
+                        task_wait(0.1) 
+                    end
+                else
+                    local tpPoints = Workspace:FindFirstChild("TeleportPoints")
+                    if tpPoints then
+                        local teleportRanch = tpPoints:FindFirstChild("TeleportRanch")
+                        if teleportRanch then
+                            rootPart.CFrame = teleportRanch:GetPivot() + Vector3.new(0, 3, 0)
+                            rootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                            task_wait(0.1) 
+                        end
+                    end
+                end
             end
-        end)
-    end,
-})
-T.Set:AddInput("AutoExecInput", {
-    Title = "Auto-Exec URL (post-reconnect)",
-    Placeholder = "https://raw.githubusercontent.com/.../script.lua",
-    Callback = function(v) Cfg.AutoExecURL = v end,
-})
-
--- ── PERFORMANCE ──
-T.Perf:AddDropdown("FPSDrop", {
-    Title = "FPS Cap", Values = {"60","120","144","240","Unlimited"}, Default = "60",
-    Callback = function(v)
-        setFPS(v); addLog("FPS: "..v)
-        Fluent:Notify({Title="FPS", Content="FPS cap: "..v, Duration=3})
-    end,
-})
-T.Perf:AddToggle("PerfTgl", {
-    Title = "Performance Mode", Default = false,
-    Callback = function(v) setPerfMode(v) end,
-})
-T.Perf:AddButton({
-    Title = "🔄 Rejoin",
-    Callback = function()
-        addLog("Rejoining...")
-        pcall(Svc.TeleportService.Teleport, Svc.TeleportService, game.PlaceId, LP)
-    end,
-})
-
--- ── WEBHOOK ──
-T.Hook:AddInput("WebURL", {
-    Title = "Webhook URL", Placeholder = "https://discord.com/api/webhooks/...",
-    Callback = function(v) Cfg.WebhookURL = v end,
-})
-T.Hook:AddInput("DiscID", {
-    Title = "Discord ID", Placeholder = "123456789012345678",
-    Callback = function(v) Cfg.DiscordID = v end,
-})
-T.Hook:AddButton({
-    Title = "🧪 Test Webhook",
-    Callback = function()
-        if Cfg.WebhookURL == "" then
-            Fluent:Notify({Title="Error", Content="Isi URL dulu!", Duration=3}); return
         end
-        local s = Ses.LastWebhook; Ses.LastWebhook = 0
-        SendWebhook("Update"); Ses.LastWebhook = s
-        Fluent:Notify({Title="Webhook", Content="Test dikirim!", Duration=3})
-    end,
-})
-
--- ─────────────────────────────────────────
---  MONITOR LOOP
--- ─────────────────────────────────────────
-task.spawn(function()
-    task.wait(2)
-    local function safeSet(obj, data)
-        pcall(function() obj:SetValues(data) end)
     end
-    while true do
-        pcall(function()
-            local ps = LP:FindFirstChild("leaderstats")
-            local cur = ps and ps:FindFirstChild("Money") and ps.Money.Value or 0
-            if Ses.StartMoney == 0 and cur > 0 then Ses.StartMoney = cur end
-            Ses.CurrentProfit = cur - Ses.StartMoney
-            local elapsed = math.max(1, math.floor((os.time() - Ses.StartTime) / 60))
-            local pph = math.floor(Ses.CurrentProfit / elapsed * 60)
-            local icon = Cfg.AutoFarm and "🟢" or "⚪"
+end
 
-            safeSet(miniLog, {
-                Title = "Activity Log",
-                Content = ("%s %s  |  Job: %s\nProfit: $%d  |  /Jam: ~$%d  |  %dm\n─────────────\n%s"):format(
-                    icon, Cfg.AutoFarm and "FARMING" or "Idle",
-                    Cfg.Job, Ses.CurrentProfit, pph, elapsed,
-                    #Ses.Logs > 0 and table.concat(Ses.Logs, "\n") or "Belum ada aktivitas."
-                )
-            })
+local function handleToggle()
+    autoFarmAktif = not autoFarmAktif
+    if autoFarmAktif then
+        ToggleButton.Text = "ON"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        task_spawn(doAutoFarm)
+    else
+        ToggleButton.Text = "OFF"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
+end
+ToggleButton.MouseButton1Click:Connect(handleToggle)
 
-            local plist = {}
-            for _, p in ipairs(Svc.Players:GetPlayers()) do
-                plist[#plist+1] = (p == LP and "★ " or "  ") .. p.Name
+local dragging, dragInput, dragStart, startPos
+
+Frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Frame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then 
+                dragging = false 
             end
-            safeSet(playerInfo, {
-                Title   = "Players ("..#Svc.Players:GetPlayers()..")",
-                Content = table.concat(plist, "\n"),
-            })
         end)
-        task.wait(1)
     end
 end)
 
--- ─────────────────────────────────────────
---  EXECUTE ANIMATION (muncul setelah semua ready)
---  Card kecil slide-in dari atas → tahan 2.5s → slide-out + fade
--- ─────────────────────────────────────────
-Win:SelectTab(1)
-addLog("✅ V1.9 siap!")
-
-task.spawn(function()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "FlowExecAnim"
-    gui.ResetOnSpawn = false
-    gui.DisplayOrder = 200
-    gui.Parent = Svc.CoreGui
-
-    local card = Instance.new("Frame", gui)
-    card.Size = UDim2.new(0, 240, 0, 62)
-    card.Position = UDim2.new(0.5, -120, 0, -70)   -- mulai di atas layar (tersembunyi)
-    card.BackgroundColor3 = Color3.fromRGB(14, 10, 24)
-    card.BorderSizePixel = 0
-    card.ClipsDescendants = true
-    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
-
-    local stroke = Instance.new("UIStroke", card)
-    stroke.Color = Color3.fromRGB(138, 92, 226)
-    stroke.Thickness = 1.5
-
-    local accent = Instance.new("Frame", card)
-    accent.Size = UDim2.new(0, 3, 1, 0)
-    accent.Position = UDim2.new(0, 0, 0, 0)
-    accent.BackgroundColor3 = Color3.fromRGB(138, 92, 226)
-    accent.BorderSizePixel = 0
-    Instance.new("UICorner", accent).CornerRadius = UDim.new(0, 3)
-
-    local title = Instance.new("TextLabel", card)
-    title.Size = UDim2.new(1, -18, 0, 26)
-    title.Position = UDim2.new(0, 14, 0, 8)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.Text = "⚡  FLOW STUDIO"
-    title.TextColor3 = Color3.fromRGB(200, 170, 255)
-    title.TextSize = 14
-    title.TextXAlignment = Enum.TextXAlignment.Left
-
-    local sub = Instance.new("TextLabel", card)
-    sub.Size = UDim2.new(1, -18, 0, 20)
-    sub.Position = UDim2.new(0, 14, 0, 34)
-    sub.BackgroundTransparency = 1
-    sub.Font = Enum.Font.Gotham
-    sub.Text = "V1.9 Premium  ·  Loaded ✓"
-    sub.TextColor3 = Color3.fromRGB(110, 90, 150)
-    sub.TextSize = 11
-    sub.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- Slide in ke Y = 18px dari atas
-    TW:Create(card, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0.5, -120, 0, 18)
-    }):Play()
-
-    task.wait(2.8)
-
-    -- Fade out + slide up
-    TW:Create(card, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-        Position = UDim2.new(0.5, -120, 0, -70),
-        BackgroundTransparency = 1,
-    }):Play()
-    TW:Create(stroke, TweenInfo.new(0.4), {Transparency = 1}):Play()
-    for _, obj in ipairs(card:GetDescendants()) do
-        if obj:IsA("TextLabel") then
-            TW:Create(obj, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
-        elseif obj:IsA("Frame") then
-            TW:Create(obj, TweenInfo.new(0.35), {BackgroundTransparency = 1}):Play()
-        end
+Frame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
     end
+end)
 
-    task.wait(0.45)
-    gui:Destroy()
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
 end)
